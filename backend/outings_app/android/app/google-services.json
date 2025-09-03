@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "708432220482",
+    "project_id": "outings-with-friends",
+    "storage_bucket": "outings-with-friends.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:708432220482:android:829ebc1b397bc29f5678db",
+        "android_client_info": {
+          "package_name": "com.android.application"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBBEnce7Qfne5Hwm4bw0YjC4cBwdSnQvC0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

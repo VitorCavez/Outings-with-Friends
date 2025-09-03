@@ -1,0 +1,176 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                     String   @id @default(uuid())
+  fullName               String
+  username               String?  @unique
+  email                  String   @unique
+  password               String
+  profilePhotoUrl        String?
+  bio                    String?
+  homeLocation           String?
+  isProfilePublic        Boolean  @default(true)
+  showAvailability       Boolean  @default(false)
+  shareLocationByDefault Boolean  @default(false)
+  defaultBudgetMin       Float?
+  defaultBudgetMax       Float?
+  preferredOutingTypes   String[] @default([])
+  outingScore            Int      @default(0)
+  createdAt              DateTime @default(now())
+
+  messagesSent     Message[] @relation("Message_sender")
+  messagesReceived Message[] @relation("DirectMessages")
+
+  groups            GroupMembership[]
+  groupsCreated     Group[]              @relation("UserCreatedGroups")
+  outingsHosted     Outing[]             @relation("Host")
+  outingRSVPs       OutingUser[]
+  contributions     OutingContribution[]
+  availabilitySlots AvailabilitySlot[]
+  calendarEntries   CalendarEntry[]
+
+  fcmToken  String? @db.Text   // NEW field for Firebase push tokens
+}
+
+model Group {
+  id                   String            @id @default(uuid())
+  name                 String
+  description          String?
+  createdAt            DateTime          @default(now())
+  createdById          String
+  groupImageUrl        String?
+  groupVisibility      String            @default("private")
+  defaultBudgetMin     Float?
+  defaultBudgetMax     Float?
+  preferredOutingTypes String[]          @default([])
+  messages             Message[]
+  createdBy            User              @relation("UserCreatedGroups", fields: [createdById], references: [id])
+  members              GroupMembership[]
+  outings              Outing[]
+  calendarEntries      CalendarEntry[]
+}
+
+model GroupMembership {
+  id      String  @id @default(uuid())
+  userId  String
+  groupId String
+  isAdmin Boolean @default(false)
+
+  user  User  @relation(fields: [userId], references: [id])
+  group Group @relation(fields: [groupId], references: [id])
+}
+
+model Outing {
+  id                  String   @id @default(uuid())
+  title               String
+  description         String?
+  outingType          String
+  createdAt           DateTime @default(now())
+  createdById         String
+  groupId             String?
+  locationName        String
+  latitude            Float
+  longitude           Float
+  address             String?
+  dateTimeStart       DateTime
+  dateTimeEnd         DateTime
+  budgetMin           Float?
+  budgetMax           Float?
+  piggyBankEnabled    Boolean  @default(false)
+  piggyBankTarget     Float?
+  checklist           String[]
+  suggestedItinerary  String?
+  liveLocationEnabled Boolean  @default(false)
+  isPublic            Boolean  @default(false)
+
+  createdBy       User                 @relation("Host", fields: [createdById], references: [id])
+  group           Group?               @relation(fields: [groupId], references: [id])
+  rsvps           OutingUser[]
+  contributions   OutingContribution[]
+  images          OutingImage[]
+  calendarEntries CalendarEntry[]      @relation("OutingCalendar")
+}
+
+model OutingUser {
+  id         String @id @default(uuid())
+  userId     String
+  outingId   String
+  rsvpStatus String
+
+  user   User   @relation(fields: [userId], references: [id])
+  outing Outing @relation(fields: [outingId], references: [id])
+}
+
+model OutingContribution {
+  id       String @id @default(uuid())
+  userId   String
+  outingId String
+  amount   Float
+
+  user   User   @relation(fields: [userId], references: [id])
+  outing Outing @relation(fields: [outingId], references: [id])
+}
+
+model OutingImage {
+  id          String @id @default(uuid())
+  outingId    String
+  imageUrl    String
+  imageSource String
+
+  outing Outing @relation(fields: [outingId], references: [id])
+}
+
+model AvailabilitySlot {
+  id            String   @id @default(uuid())
+  userId        String
+  activityType  String?
+  dateTimeStart DateTime
+  dateTimeEnd   DateTime
+  repeatPattern String?
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model CalendarEntry {
+  id              String   @id @default(uuid())
+  title           String
+  description     String?
+  dateTimeStart   DateTime
+  dateTimeEnd     DateTime
+  isAllDay        Boolean  @default(false)
+  isReminder      Boolean  @default(false)
+  createdByUserId String
+  linkedOutingId  String?
+  groupId         String?
+  createdAt       DateTime @default(now())
+
+  user   User    @relation(fields: [createdByUserId], references: [id])
+  group  Group?  @relation(fields: [groupId], references: [id])
+  outing Outing? @relation("OutingCalendar", fields: [linkedOutingId], references: [id])
+}
+
+model Message {
+  id          String   @id @default(uuid())
+  text        String
+  senderId    String
+  groupId     String?
+  recipientId String?
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  sender    User   @relation("Message_sender", fields: [senderId], references: [id])
+  recipient User?  @relation("DirectMessages", fields: [recipientId], references: [id])
+  group     Group? @relation(fields: [groupId], references: [id])
+
+  @@index([groupId])
+  @@index([recipientId])
+}

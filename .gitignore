@@ -1,0 +1,71 @@
+# ======================
+# Node.js / Backend
+# ======================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Generated Prisma files
+/generated/prisma
+backend/prisma/dev.db
+backend/prisma/dev.db-journal
+
+# Firebase Admin service account key
+backend/firebaseServiceAccount.json
+
+# ======================
+# Flutter / Dart
+# ======================
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+build/
+coverage/
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
+
+# ======================
+# OS / IDE junk
+# ======================
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
+*.iml
+
+# ======================
+# Windows
+# ======================
+*.exe
+*.dll
+*.lnk
+
+# ======================
+# Android / iOS build artifacts
+# ======================
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/ServiceDefinitions.json
+**/ios/Runner/GeneratedPluginRegistrant.*
+**/ios/Flutter/Generated.xcconfig
+
+**/android/.gradle/
+**/android/app/build/
+**/android/local.properties
+
+# ======================
+# Misc
+# ======================
+*.swp
+*.swo
