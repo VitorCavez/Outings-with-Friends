@@ -1,5 +1,6 @@
 // lib/main.dart
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -12,53 +13,67 @@ import 'routes/app_router.dart';
 import 'features/auth/auth_provider.dart';
 import 'services/push_service.dart';
 
-/// Background FCM handler must be a top-level function.
+// 🚀 Offline Outbox
+import 'services/outbox_service.dart';
+
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp();
-  // Do any lightweight background handling here (logging, local storage, etc.)
-  // Avoid UI here.
+  try {
+    await Firebase.initializeApp();
+  } catch (_) {}
 }
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Firebase once.
-  await Firebase.initializeApp();
+  final bool useFirebase = Platform.isAndroid || Platform.isIOS;
 
-  // Register the background handler early.
-  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+  if (useFirebase) {
+    await Firebase.initializeApp();
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+  }
 
-  runApp(const OutingsApp());
+  // ✅ Start Offline Outbox (connectivity listener + auto-flush)
+  OutboxService.instance.start();
+
+  runApp(OutingsApp(useFirebase: useFirebase));
 }
 
 class OutingsApp extends StatelessWidget {
-  const OutingsApp({super.key});
+  const OutingsApp({super.key, required this.useFirebase});
+  final bool useFirebase;
 
   @override
   Widget build(BuildContext context) {
+    final appShell = MaterialApp.router(
+      debugShowCheckedModeBanner: false,
+      routerConfig: AppRouter.router,
+      title: 'Outings with Friends',
+      theme: ThemeData(primarySwatch: Colors.purple),
+    );
+
     return ChangeNotifierProvider(
       create: (_) => AuthProvider(),
-      child: FCMInitializer(
-        child: MaterialApp.router(
-          debugShowCheckedModeBanner: false,
-          routerConfig: AppRouter.router,
-          title: 'Outings with Friends',
-          theme: ThemeData(
-            primarySwatch: Colors.purple,
-          ),
-        ),
+      child: Builder(
+        builder: (ctx) {
+          // 🔧 CHECKLIST EXECUTOR: wire token-based HTTP executor
+          OutboxService.instance.setChecklistExecutor(
+            OutboxService.buildHttpChecklistExecutor(
+              tokenProvider: () async {
+                // TODO: read your JWT from AuthProvider once auth is ready
+                // final auth = ctx.read<AuthProvider>();
+                // return auth.token ?? '';
+                return '';
+              },
+            ),
+          );
+          return useFirebase ? FCMInitializer(child: appShell) : appShell;
+        },
       ),
     );
   }
 }
 
-/// A small widget that sets up Firebase Messaging once the widget tree is ready.
-/// It:
-/// - requests notification permission (Android 13+ and iOS)
-/// - fetches the FCM token and registers it with your backend
-/// - listens for token refresh and re-registers
-/// - (optionally) logs foreground messages
 class FCMInitializer extends StatefulWidget {
   const FCMInitializer({super.key, required this.child});
   final Widget child;
@@ -69,9 +84,6 @@ class FCMInitializer extends StatefulWidget {
 
 class _FCMInitializerState extends State<FCMInitializer> {
   StreamSubscription<String>? _tokenSub;
-
-  // TODO: Replace this with your real logged-in user id from AuthProvider once available.
-  // For now we keep the same placeholder you've been using during Phase 3.
   static const String _fallbackUserId = '698381fc-ad46-49b0-94c5-3f6c94534bc9';
 
   @override
@@ -81,42 +93,34 @@ class _FCMInitializerState extends State<FCMInitializer> {
   }
 
   Future<void> _initFCM() async {
-    // Ask for permission (iOS required, Android 13+ will show prompt)
-    final settings = await FirebaseMessaging.instance.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
-    debugPrint('🔔 FCM permission: ${settings.authorizationStatus}');
+    try {
+      final settings = await FirebaseMessaging.instance.requestPermission(
+        alert: true, badge: true, sound: true,
+      );
+      debugPrint('🔔 FCM permission: ${settings.authorizationStatus}');
 
-    // Log foreground messages (optional; for dev)
-    FirebaseMessaging.onMessage.listen((RemoteMessage m) {
-      debugPrint('📩 FCM (foreground): ${m.notification?.title} - ${m.notification?.body}');
-    });
+      FirebaseMessaging.onMessage.listen((RemoteMessage m) {
+        debugPrint('📩 FCM (foreground): ${m.notification?.title} - ${m.notification?.body}');
+      });
 
-    // Get the initial token and register it
-    await _registerCurrentToken();
+      await _registerCurrentToken();
 
-    // Keep backend updated when the token rotates
-    _tokenSub = FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
-      debugPrint('🔄 FCM token refreshed: $newToken');
-      final userId = _resolveUserId();
-      if (userId != null) {
-        await PushService.registerToken(userId: userId, token: newToken);
-      }
-    });
+      _tokenSub = FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
+        debugPrint('🔄 FCM token refreshed: $newToken');
+        final userId = _resolveUserId();
+        if (userId != null) {
+          await PushService.registerToken(userId: userId, token: newToken);
+        }
+      });
+    } catch (e) {
+      debugPrint('⚠️ FCM init skipped/failed: $e');
+    }
   }
 
   String? _resolveUserId() {
-    // Try to get a real user id from AuthProvider if it’s available.
-    // Adjust this to match your AuthProvider’s API when you wire auth.
     final auth = context.read<AuthProvider>();
     try {
-      // Common patterns — adapt as needed:
-      // return auth.currentUser?.id;
-      // return auth.userId;
-      // For now use the known fallback (replace when auth is ready):
-      return _fallbackUserId;
+      return _fallbackUserId; // replace once auth is ready
     } catch (_) {
       return _fallbackUserId;
     }
