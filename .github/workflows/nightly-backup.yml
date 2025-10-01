@@ -1,0 +1,48 @@
+name: Nightly DB Backup
+
+on:
+  schedule:
+    # 02:00 UTC every day
+    - cron: '0 2 * * *'
+  # allow manual runs from the Actions tab
+  workflow_dispatch: {}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate --schema ./backend/prisma/schema.prisma
+
+      - name: Run backup script
+        env:
+          # Set this in GitHub: Settings → Secrets and variables → Actions → New repository secret
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: node backend/scripts/admin.js backup
+
+      # Upload whatever your script wrote (adjust the globs if your script uses a different folder/file pattern)
+      - name: Upload backup artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ github.run_id }}
+          path: |
+            backend/backups/**
+            backups/**
+            **/backup*.json
+            **/backup*.zip
+          if-no-files-found: warn
+          retention-days: 7
