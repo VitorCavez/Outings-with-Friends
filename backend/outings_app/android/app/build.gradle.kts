@@ -1,31 +1,29 @@
-// android/app/build.gradle.kts (Kotlin DSL)
-
+// backend/outings_app/android/app/build.gradle.kts
 plugins {
     id("com.android.application")
-    // ✅ Kotlin plugin ID for Kotlin DSL:
     id("org.jetbrains.kotlin.android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin plugins.
+    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
-    // Firebase / Google services
+
+    // ✅ Apply Google Services here WITHOUT version (version is in root build.gradle.kts)
     id("com.google.gms.google-services")
 }
 
 android {
     namespace = "com.example.outings_app"
-
-    // Values provided by Flutter's Gradle plugin
     compileSdk = flutter.compileSdkVersion
 
-    // ✅ Kotlin DSL format; keep only one ndkVersion line:
+    // Keep only Kotlin DSL form
     ndkVersion = "27.0.12077973"
 
-    // AGP 8.7.x requires Java 17
+    // Use Java 17 (matches your JDK & modern AGP/KGP)
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
     kotlinOptions {
-        jvmTarget = "17"
+        jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
     defaultConfig {

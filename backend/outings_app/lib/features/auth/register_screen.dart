@@ -1,7 +1,9 @@
+// lib/features/auth/register_screen.dart
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+
+import '../../config/app_config.dart';
+import 'auth_api.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -11,58 +13,53 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  final _fullNameController = TextEditingController();
+  final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
-  bool _isLoading = false;
+  bool _busy = false;
   String? _error;
 
   Future<void> _register() async {
-    final fullName = _fullNameController.text.trim();
+    final name = _nameController.text.trim();
     final email = _emailController.text.trim();
     final password = _passwordController.text;
 
-    if (fullName.isEmpty || email.isEmpty || password.isEmpty) {
+    if (name.isEmpty || email.isEmpty || password.isEmpty) {
       setState(() => _error = 'Please fill all fields.');
       return;
     }
 
     setState(() {
-      _isLoading = true;
+      _busy = true;
       _error = null;
     });
 
     try {
-      final response = await http.post(
-        Uri.parse('http://localhost:4000/api/auth/register'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'fullName': fullName,
-          'email': email,
-          'password': password,
-        }),
-      );
+      // Backend expects { name, email, password }
+      await AuthApi.register({
+        'name': name,
+        'email': email,
+        'password': password,
+      });
 
-      final data = json.decode(response.body);
-
-      if (response.statusCode == 201) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Registration successful.')),
-        );
-        context.go('/home');
-      } else {
-        setState(() => _error = data['error'] ?? 'Registration failed.');
-      }
-    } catch (e) {
-      setState(() => _error = 'Server error.');
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Registration successful')));
+      context.go('/home');
+    } on AuthException catch (e) {
+      setState(() => _error = e.message);
+    } catch (_) {
+      setState(() => _error = 'Could not reach the server. Please try again.');
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _busy = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final base = AppConfig.apiBaseUrl;
     return Scaffold(
       body: Padding(
         padding: const EdgeInsets.all(24.0),
@@ -70,13 +67,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Text('Register', style: TextStyle(fontSize: 24)),
+            const SizedBox(height: 8),
+            // tiny hint to confirm dart-define is flowing
+            Text(
+              base,
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
             const SizedBox(height: 24),
             TextField(
-              controller: _fullNameController,
-              decoration: const InputDecoration(labelText: 'Full Name'),
+              controller: _nameController,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(labelText: 'Full name'),
             ),
             TextField(
               controller: _emailController,
+              keyboardType: TextInputType.emailAddress,
               decoration: const InputDecoration(labelText: 'Email'),
             ),
             TextField(
@@ -84,17 +89,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
               decoration: const InputDecoration(labelText: 'Password'),
               obscureText: true,
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
             if (_error != null)
               Text(_error!, style: const TextStyle(color: Colors.red)),
+            const SizedBox(height: 10),
             ElevatedButton(
-              onPressed: _isLoading ? null : _register,
-              child: _isLoading
-                  ? const CircularProgressIndicator()
+              onPressed: _busy ? null : _register,
+              child: _busy
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : const Text('Register'),
             ),
             TextButton(
-              onPressed: () => context.go('/'),
+              onPressed: _busy ? null : () => context.go('/'),
               child: const Text('Already have an account? Login'),
             ),
           ],
