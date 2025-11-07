@@ -21,11 +21,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
   String? _error;
 
   Future<void> _register() async {
-    final name = _nameController.text.trim();
+    final fullName = _nameController.text.trim(); // <-- call it fullName here
     final email = _emailController.text.trim();
     final password = _passwordController.text;
 
-    if (name.isEmpty || email.isEmpty || password.isEmpty) {
+    if (fullName.isEmpty || email.isEmpty || password.isEmpty) {
       setState(() => _error = 'Please fill all fields.');
       return;
     }
@@ -36,9 +36,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
     });
 
     try {
-      // Backend expects { name, email, password }
+      // Backend expects { fullName, email, password }
       await AuthApi.register({
-        'name': name,
+        'fullName': fullName, // <-- key changed from 'name' to 'fullName'
         'email': email,
         'password': password,
       });
@@ -68,7 +68,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
           children: [
             const Text('Register', style: TextStyle(fontSize: 24)),
             const SizedBox(height: 8),
-            // tiny hint to confirm dart-define is flowing
             Text(
               base,
               style: const TextStyle(fontSize: 12, color: Colors.grey),
