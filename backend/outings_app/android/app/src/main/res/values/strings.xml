@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">outings_app</string>
+    <string name="mapbox_access_token">pk.eyJ1Ijoidml0b3JjYXZleiIsImEiOiJjbWZlMnp4amgwMjFxMmpyOTkzdHpsNTIxIn0.iRrZbYhMVRVoCWMihVIBVw</string>
+</resources>
