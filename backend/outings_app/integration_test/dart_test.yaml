@@ -1,0 +1,10 @@
+# integration_test/dart_test.yaml
+# Ensures integration tests run sequentially on Windows/macOS/Linux.
+# Prevents "log reader stopped unexpectedly" when multiple apps launch in parallel.
+
+tags:
+  integration:
+    timeout: 5m
+
+# Limit concurrency to 1 for all integration tests
+concurrency: 1
