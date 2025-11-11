@@ -17,4 +17,14 @@ router.post('/api/outings/:outingId/itinerary', /* requireAuth, */ createItinera
 router.put('/api/outings/:outingId/itinerary/:itemId', /* requireAuth, */ updateItineraryItem);
 router.delete('/api/outings/:outingId/itinerary/:itemId', /* requireAuth, */ deleteItineraryItem);
 
+router.get('/api/itinerary/:outingId', async (req, res) => {
+  try {
+    const { outingId } = req.params;
+    res.json({ outingId, items: [] });
+  } catch (err) {
+    console.error('itineraryRoutes error:', err);
+    res.status(500).json({ error: 'Failed to load itinerary' });
+  }
+});
+
 module.exports = router;
