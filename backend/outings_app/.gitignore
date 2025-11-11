@@ -1,45 +1,115 @@
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
+# =========================
+# OS / Editors
+# =========================
 .DS_Store
-.atom/
+Thumbs.db
+*.swp
+*.swo
+*.tmp
+
+# IntelliJ / Android Studio
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# VS Code (keep if you want to share tasks/launch)
+#.vscode/
+
+# =========================
+# Flutter / Dart
+# =========================
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub/
+.pub-cache/
+**/doc/api/
+
+# Build output (all platforms)
+**/build/
+**/ios/Flutter/.last_build_id
+
+# Generated plugin registrants (don’t edit by hand)
+**/macos/Flutter/GeneratedPluginRegistrant.swift
+**/linux/flutter/generated_plugin_registrant.cc
+**/linux/flutter/generated_plugins.cmake
+**/windows/flutter/generated_plugin_registrant.cc
+**/windows/flutter/generated_plugins.cmake
+
+# Symbolication / obfuscation outputs
+app.*.symbols
+app.*.map.json
+
+# Android Studio build variants
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Gradle caches
+**/.gradle/
+**/local.properties
+
+# Keystores (keep secrets out of git)
+my-release-key.keystore
+**/*.jks
+**/*.keystore
+
+# =========================
+# iOS / CocoaPods
+# =========================
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/ServiceDefinitions.json
+**/ios/Runner/GeneratedPluginRegistrant.*
+
+# =========================
+# Backend (Node/Express)
+# =========================
+backend/node_modules/
+backend/dist/
+backend/.eslintcache
+backend/.cache/
+backend/npm-debug.log*
+backend/yarn-debug.log*
+backend/yarn-error.log*
+backend/.nyc_output/
+backend/coverage/
+
+# Prisma (generated client/build artifacts)
+backend/prisma/client/
+backend/prisma/*.db
+
+# =========================
+# Env / Secrets (root and backend)
+# =========================
+.env
+.env.*
+backend/.env
+backend/.env.*
+*.dotenv
+*.env.local
+*.env.development
+*.env.production
+*.env.test
+
+# Firebase Admin / service accounts (DO NOT COMMIT)
+backend/*serviceAccount*.json
+backend/*firebase*.json
+backend/firebase-adminsdk-*.json
+
+# =========================
+# Misc
+# =========================
+*.log
+migrate_working_dir/
 .build/
 .buildlog/
 .history
 .svn/
 .swiftpm/
-migrate_working_dir/
-
-# IntelliJ related
-*.iml
-*.ipr
-*.iws
-.idea/
-
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
-.dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
-.pub-cache/
-.pub/
-/build/
-
-# Symbolication related
-app.*.symbols
-
-# Obfuscation related
-app.*.map.json
-
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+app_links.json

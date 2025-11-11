@@ -1,35 +1,33 @@
-// android/app/build.gradle (Kotlin DSL)
-
+// backend/outings_app/android/app/build.gradle.kts
 plugins {
     id("com.android.application")
-    id("kotlin-android")
+    id("org.jetbrains.kotlin.android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 
-    // NEW: apply Google Services plugin in the app module
+    // ✅ Apply Google Services here WITHOUT version (version is in root build.gradle.kts)
     id("com.google.gms.google-services")
 }
 
 android {
     namespace = "com.example.outings_app"
     compileSdk = flutter.compileSdkVersion
+
+    // Keep only Kotlin DSL form
     ndkVersion = "27.0.12077973"
 
-    ndkVersion "27.0.12077973"
-
+    // Use Java 17 (matches your JDK & modern AGP/KGP)
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_11.toString()
+        jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
     defaultConfig {
         applicationId = "com.example.outings_app"
-        // FCM requires minSdk 21+. Flutter’s default is usually fine, but if you hit errors set:
-        // minSdk = 21
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

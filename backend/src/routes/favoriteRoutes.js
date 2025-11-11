@@ -19,4 +19,13 @@ router.delete('/api/outings/:outingId/favorite', /* requireAuth, */ unfavoriteOu
 // List current user’s favorites
 router.get('/api/users/me/favorites', /* requireAuth, */ listMyFavorites);
 
+router.get('/api/favorites', async (_req, res) => {
+  try {
+    res.json({ items: [] });
+  } catch (err) {
+    console.error('favoriteRoutes error:', err);
+    res.status(500).json({ error: 'Failed to load favorites' });
+  }
+});
+
 module.exports = router;
