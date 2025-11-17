@@ -1,47 +1,50 @@
-// backend/outings_app/android/app/build.gradle.kts
+// android/app/build.gradle.kts
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
-    id("dev.flutter.flutter-gradle-plugin")
-
-    // ✅ Apply Google Services here WITHOUT version (version is in root build.gradle.kts)
+    id("dev.flutter.flutter-gradle-plugin") // gives flutter {} and embedder
     id("com.google.gms.google-services")
 }
 
 android {
     namespace = "com.example.outings_app"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
 
-    // Keep only Kotlin DSL form
-    ndkVersion = "27.0.12077973"
-
-    // Use Java 17 (matches your JDK & modern AGP/KGP)
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
-    }
+    kotlinOptions { jvmTarget = "17" }
 
     defaultConfig {
         applicationId = "com.example.outings_app"
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        multiDexEnabled = true
     }
 
     buildTypes {
         release {
-            // Signing with debug keys so `flutter run --release` works during dev.
+            // No shrinking for now (avoids the “Removing unused resources requires code shrinking” error)
+            isMinifyEnabled = false
+            isShrinkResources = false
             signingConfig = signingConfigs.getByName("debug")
+        }
+        debug {
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.2")
 }
