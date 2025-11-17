@@ -1,48 +1,65 @@
+// lib/services/outings_service.dart
 import 'dart:convert';
+import 'dart:async';
 import 'package:http/http.dart' as http;
 
-import '../config/app_config.dart';
+import '../services/api_client.dart';
 import '../models/outing_details_model.dart';
 import '../models/piggy_bank_models.dart';
 import '../models/expense_models.dart';
 
 class OutingsService {
-  // Use the platform/env-aware base URL from AppConfig
-  final String _base = AppConfig.apiBaseUrl;
+  OutingsService(this.api);
+  final ApiClient api;
 
-  // Default JSON headers shared across requests
-  Map<String, String> get _headers => AppConfig.defaultHeaders;
+  bool _ok(int s) => s >= 200 && s < 300;
 
-  bool _ok(int status) => status >= 200 && status < 300;
-
-  // ---------------------------
-  // Outing details
-  // ---------------------------
+  // ---- Outing details -------------------------------------------------
   Future<OutingDetails> fetchOutingDetails(String id) async {
-    final uri = Uri.parse('$_base/api/outings/$id');
-    final res = await http.get(uri, headers: _headers);
+    final uri = '/api/outings/$id';
+    http.Response res;
+    try {
+      // Short, explicit timeout so the UI doesn’t hang indefinitely
+      res = await api.get(uri).timeout(const Duration(seconds: 10));
+    } on TimeoutException {
+      throw TimeoutException('GET $uri timed out');
+    } catch (e) {
+      rethrow; // let UI show the underlying socket/dns error
+    }
+
+    // Helpful diagnostics in logs
+    // ignore: avoid_print
+    print('GET $uri → ${res.statusCode} ${res.reasonPhrase}');
 
     if (_ok(res.statusCode)) {
-      final data = jsonDecode(res.body) as Map<String, dynamic>;
-      return OutingDetails.fromJson(data);
+      // some backends return {data: {...}}; others return the object directly
+      final decoded = jsonDecode(res.body);
+      final map = (decoded is Map<String, dynamic>)
+          ? (decoded['data'] is Map<String, dynamic>
+                ? decoded['data'] as Map<String, dynamic>
+                : decoded as Map<String, dynamic>)
+          : <String, dynamic>{};
+      return OutingDetails.fromJson(map);
     }
-    throw Exception('GET /outings/$id failed (${res.statusCode}) ${res.body}');
+
+    // bubble up body to the UI so you can see server errors quickly
+    throw Exception('GET $uri failed (${res.statusCode}) ${res.body}');
   }
 
-  // ---------------------------
-  // PHASE 5: Piggy Bank
-  // ---------------------------
+  // ---- Piggy Bank -----------------------------------------------------
   Future<PiggyBankSummary> getPiggyBankSummary(String outingId) async {
-    final uri = Uri.parse('$_base/api/outings/$outingId/piggybank');
-    final res = await http.get(uri, headers: _headers);
-
+    final uri = '/api/outings/$outingId/piggybank';
+    final res = await api.get(uri).timeout(const Duration(seconds: 10));
     if (_ok(res.statusCode)) {
-      return PiggyBankSummary.fromJson(
-        jsonDecode(res.body) as Map<String, dynamic>,
-      );
+      final decoded = jsonDecode(res.body);
+      final map = (decoded is Map<String, dynamic>)
+          ? (decoded['data'] is Map<String, dynamic>
+                ? decoded['data'] as Map<String, dynamic>
+                : decoded as Map<String, dynamic>)
+          : <String, dynamic>{};
+      return PiggyBankSummary.fromJson(map);
     }
-    throw Exception(
-        'GET /outings/$outingId/piggybank failed (${res.statusCode}) ${res.body}');
+    throw Exception('GET $uri failed (${res.statusCode}) ${res.body}');
   }
 
   Future<Contribution> addContribution({
@@ -51,47 +68,42 @@ class OutingsService {
     required int amountCents,
     String? note,
   }) async {
-    final uri =
-        Uri.parse('$_base/api/outings/$outingId/piggybank/contributions');
-
-    final body = jsonEncode({
-      'userId': userId,
-      'amountCents': amountCents,
-      if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
-    });
-
-    final res = await http.post(
-      uri,
-      headers: {
-        ..._headers,
-        'Content-Type': 'application/json',
-      },
-      body: body,
-    );
+    final uri = '/api/outings/$outingId/piggybank/contributions';
+    final res = await api
+        .postJson(uri, {
+          'userId': userId,
+          'amountCents': amountCents,
+          if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+        })
+        .timeout(const Duration(seconds: 10));
 
     if (_ok(res.statusCode)) {
-      final map = jsonDecode(res.body) as Map<String, dynamic>;
-      final contrib = map['contribution'] as Map<String, dynamic>? ?? map;
+      final decoded = jsonDecode(res.body);
+      final map = (decoded is Map<String, dynamic>)
+          ? decoded
+          : <String, dynamic>{};
+      final contrib = map['contribution'] is Map<String, dynamic>
+          ? map['contribution'] as Map<String, dynamic>
+          : map;
       return Contribution.fromJson(contrib);
     }
-    throw Exception(
-        'POST /outings/$outingId/piggybank/contributions failed (${res.statusCode}) ${res.body}');
+    throw Exception('POST $uri failed (${res.statusCode}) ${res.body}');
   }
 
-  // ---------------------------
-  // PHASE 5: Expenses
-  // ---------------------------
+  // ---- Expenses -------------------------------------------------------
   Future<ExpenseSummary> getExpenseSummary(String outingId) async {
-    final uri = Uri.parse('$_base/api/outings/$outingId/expenses/summary');
-    final res = await http.get(uri, headers: _headers);
-
+    final uri = '/api/outings/$outingId/expenses/summary';
+    final res = await api.get(uri).timeout(const Duration(seconds: 10));
     if (_ok(res.statusCode)) {
-      return ExpenseSummary.fromJson(
-        jsonDecode(res.body) as Map<String, dynamic>,
-      );
+      final decoded = jsonDecode(res.body);
+      final map = (decoded is Map<String, dynamic>)
+          ? (decoded['data'] is Map<String, dynamic>
+                ? decoded['data'] as Map<String, dynamic>
+                : decoded as Map<String, dynamic>)
+          : <String, dynamic>{};
+      return ExpenseSummary.fromJson(map);
     }
-    throw Exception(
-        'GET /outings/$outingId/expenses/summary failed (${res.statusCode}) ${res.body}');
+    throw Exception('GET $uri failed (${res.statusCode}) ${res.body}');
   }
 
   Future<Expense> addExpense({
@@ -101,30 +113,27 @@ class OutingsService {
     String? description,
     String? category,
   }) async {
-    final uri = Uri.parse('$_base/api/outings/$outingId/expenses');
-
-    final body = jsonEncode({
-      'payerId': payerId,
-      'amountCents': amountCents,
-      if (description != null && description.trim().isNotEmpty)
-        'description': description.trim(),
-      if (category != null && category.trim().isNotEmpty)
-        'category': category.trim(),
-    });
-
-    final res = await http.post(
-      uri,
-      headers: {
-        ..._headers,
-        'Content-Type': 'application/json',
-      },
-      body: body,
-    );
+    final uri = '/api/outings/$outingId/expenses';
+    final res = await api
+        .postJson(uri, {
+          'payerId': payerId,
+          'amountCents': amountCents,
+          if (description != null && description.trim().isNotEmpty)
+            'description': description.trim(),
+          if (category != null && category.trim().isNotEmpty)
+            'category': category.trim(),
+        })
+        .timeout(const Duration(seconds: 10));
 
     if (_ok(res.statusCode)) {
-      return Expense.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+      final decoded = jsonDecode(res.body);
+      final map = (decoded is Map<String, dynamic>)
+          ? (decoded['data'] is Map<String, dynamic>
+                ? decoded['data'] as Map<String, dynamic>
+                : decoded as Map<String, dynamic>)
+          : <String, dynamic>{};
+      return Expense.fromJson(map);
     }
-    throw Exception(
-        'POST /outings/$outingId/expenses failed (${res.statusCode}) ${res.body}');
+    throw Exception('POST $uri failed (${res.statusCode}) ${res.body}');
   }
 }

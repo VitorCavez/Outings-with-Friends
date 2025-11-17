@@ -1,7 +1,7 @@
 // lib/services/outbox_service.dart
 import 'dart:async';
 import 'dart:collection';
-import 'dart:convert'; // ✅ standard JSON
+import 'dart:convert';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
@@ -11,9 +11,9 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../config/app_config.dart';
 
 /// Types of outbox tasks we support.
-enum OutboxType { message, checklist }
+enum OutboxType { message, checklist, outingCreate, outingUpdate }
 
-/// Message payload (you can extend as needed)
+/// Message payload
 class MessagePayload {
   final String senderId;
   final String? recipientId;
@@ -35,7 +35,7 @@ class MessagePayload {
 /// Checklist payload (generic)
 class ChecklistPayload {
   final String outingId;
-  final String itemId; // e.g. a checklist item id or client-generated key
+  final String itemId;
   final bool checked;
   final String? note;
 
@@ -47,6 +47,29 @@ class ChecklistPayload {
   });
 }
 
+/// Outing create payload (kept minimal; extend as needed)
+class OutingCreatePayload {
+  final String title;
+  final DateTime? date; // nullable to match callers
+  final String? location;
+  final String? description;
+
+  const OutingCreatePayload({
+    required this.title,
+    this.date,
+    this.location,
+    this.description,
+  });
+}
+
+/// Outing update payload
+class OutingUpdatePayload {
+  final String outingId;
+  final Map<String, dynamic> patch;
+
+  const OutingUpdatePayload({required this.outingId, required this.patch});
+}
+
 /// A task that can be retried until it succeeds.
 class OutboxTask {
   final String id;
@@ -56,16 +79,14 @@ class OutboxTask {
   int attempts = 0;
   DateTime lastTried = DateTime.fromMillisecondsSinceEpoch(0);
 
-  OutboxTask({
-    required this.id,
-    required this.type,
-    required this.payload,
-  });
+  OutboxTask({required this.id, required this.type, required this.payload});
 }
 
 /// Executors let us plug different send mechanisms (Socket or HTTP).
 typedef MessageExecutor = Future<void> Function(MessagePayload p);
 typedef ChecklistExecutor = Future<void> Function(ChecklistPayload p);
+typedef OutingCreateExecutor = Future<void> Function(OutingCreatePayload p);
+typedef OutingUpdateExecutor = Future<void> Function(OutingUpdatePayload p);
 
 /// The OutboxService is a singleton that:
 /// - Keeps a FIFO queue of tasks in memory
@@ -75,15 +96,17 @@ class OutboxService {
   OutboxService._();
   static final OutboxService instance = OutboxService._();
 
-  // Public stream to observe queue changes (optional)
+  // Public stream to observe queue length (optional UI badge)
   final ValueNotifier<int> pendingCount = ValueNotifier<int>(0);
 
-  // In-memory queue (can later be persisted to disk)
+  // In-memory queue (can persist to disk later)
   final Queue<OutboxTask> _queue = Queue<OutboxTask>();
 
   // Executors (can be overridden from app code or tests)
   MessageExecutor? _messageExecutor;
   ChecklistExecutor? _checklistExecutor;
+  OutingCreateExecutor? _outingCreateExecutor;
+  OutingUpdateExecutor? _outingUpdateExecutor;
 
   // Optional socket reference for message send
   IO.Socket? _socket;
@@ -99,16 +122,14 @@ class OutboxService {
     if (_started) return;
     _started = true;
 
-    // Default executors: HTTP-based message sender; checklist unconfigured until you wire endpoint.
+    // Defaults
     _messageExecutor ??= _defaultHttpMessageSender;
 
     // Connectivity listener
     _connSub = Connectivity().onConnectivityChanged.listen((results) {
       final isNowOnline = results.any((r) => r != ConnectivityResult.none);
       _online = isNowOnline;
-      if (_online) {
-        _flush();
-      }
+      if (_online) _flush();
     });
 
     // Try initial flush shortly after start (e.g., app relaunch)
@@ -127,19 +148,18 @@ class OutboxService {
   /// Allow wiring a socket emitter for messages.
   void setSocket(IO.Socket? socket) {
     _socket = socket;
-    // If socket becomes available again, attempt a flush
     if (_online) _flush();
   }
 
-  /// Override message sender
-  void setMessageExecutor(MessageExecutor exec) {
-    _messageExecutor = exec;
-  }
+  // ---- Set executors -------------------------------------------------------
 
-  /// Override checklist sender
-  void setChecklistExecutor(ChecklistExecutor exec) {
-    _checklistExecutor = exec;
-  }
+  void setMessageExecutor(MessageExecutor exec) => _messageExecutor = exec;
+  void setChecklistExecutor(ChecklistExecutor exec) =>
+      _checklistExecutor = exec;
+  void setOutingCreateExecutor(OutingCreateExecutor exec) =>
+      _outingCreateExecutor = exec;
+  void setOutingUpdateExecutor(OutingUpdateExecutor exec) =>
+      _outingUpdateExecutor = exec;
 
   /// Manually set online/offline (handy for tests or manual toggles)
   void setOnline(bool online) {
@@ -158,18 +178,20 @@ class OutboxService {
     String? messageType,
   }) async {
     final id = _genId();
-    _queue.add(OutboxTask(
-      id: id,
-      type: OutboxType.message,
-      payload: MessagePayload(
-        senderId: senderId,
-        recipientId: recipientId,
-        groupId: groupId,
-        text: text,
-        mediaUrl: mediaUrl,
-        messageType: messageType,
+    _queue.add(
+      OutboxTask(
+        id: id,
+        type: OutboxType.message,
+        payload: MessagePayload(
+          senderId: senderId,
+          recipientId: recipientId,
+          groupId: groupId,
+          text: text,
+          mediaUrl: mediaUrl,
+          messageType: messageType,
+        ),
       ),
-    ));
+    );
     _notify();
     if (_online) _flush();
   }
@@ -181,16 +203,60 @@ class OutboxService {
     String? note,
   }) async {
     final id = _genId();
-    _queue.add(OutboxTask(
-      id: id,
-      type: OutboxType.checklist,
-      payload: ChecklistPayload(
-        outingId: outingId,
-        itemId: itemId,
-        checked: checked,
-        note: note,
+    _queue.add(
+      OutboxTask(
+        id: id,
+        type: OutboxType.checklist,
+        payload: ChecklistPayload(
+          outingId: outingId,
+          itemId: itemId,
+          checked: checked,
+          note: note,
+        ),
       ),
-    ));
+    );
+    _notify();
+    if (_online) _flush();
+  }
+
+  /// Queue an outing creation and return a client-generated id you can use
+  /// to render a local placeholder (e.g., 'local-<clientId>').
+  Future<String> enqueueOutingCreate({
+    required String title,
+    DateTime? date,
+    String? location,
+    String? description,
+  }) async {
+    final clientId = _genId();
+    _queue.add(
+      OutboxTask(
+        id: clientId,
+        type: OutboxType.outingCreate,
+        payload: OutingCreatePayload(
+          title: title,
+          date: date,
+          location: location,
+          description: description,
+        ),
+      ),
+    );
+    _notify();
+    if (_online) _flush();
+    return clientId;
+  }
+
+  Future<void> enqueueOutingUpdate({
+    required String outingId,
+    required Map<String, dynamic> patch,
+  }) async {
+    final id = _genId();
+    _queue.add(
+      OutboxTask(
+        id: id,
+        type: OutboxType.outingUpdate,
+        payload: OutingUpdatePayload(outingId: outingId, patch: patch),
+      ),
+    );
     _notify();
     if (_online) _flush();
   }
@@ -200,19 +266,15 @@ class OutboxService {
   // ---------- Internal: flush logic -----------------------------------------
 
   Future<void> _flush() async {
-    if (_flushing) return;
-    if (!_online) return;
-    if (_queue.isEmpty) return;
+    if (_flushing || !_online || _queue.isEmpty) return;
 
     _flushing = true;
     try {
-      // Simple linear pass; failed items are re-queued with basic delay/backoff
       final int startSize = _queue.length;
       for (int i = 0; i < startSize; i++) {
         final task = _queue.removeFirst();
         final success = await _process(task);
         if (!success) {
-          // Basic backoff: wait a bit more for future retries
           task.attempts += 1;
           task.lastTried = DateTime.now();
           _queue.add(task);
@@ -221,7 +283,6 @@ class OutboxService {
       }
     } finally {
       _flushing = false;
-      // If still have items and still online, try again after a small delay
       if (_online && _queue.isNotEmpty) {
         Future.delayed(const Duration(seconds: 2), _flush);
       }
@@ -245,6 +306,28 @@ class OutboxService {
           }
           await _checklistExecutor!(p2);
           return true;
+
+        case OutboxType.outingCreate:
+          final p3 = task.payload as OutingCreatePayload;
+          if (_outingCreateExecutor == null) {
+            debugPrint(
+              '[outbox] outingCreate executor not set; keeping queued',
+            );
+            return false;
+          }
+          await _outingCreateExecutor!(p3);
+          return true;
+
+        case OutboxType.outingUpdate:
+          final p4 = task.payload as OutingUpdatePayload;
+          if (_outingUpdateExecutor == null) {
+            debugPrint(
+              '[outbox] outingUpdate executor not set; keeping queued',
+            );
+            return false;
+          }
+          await _outingUpdateExecutor!(p4);
+          return true;
       }
     } catch (e) {
       debugPrint('[outbox] task ${task.id} failed: $e');
@@ -267,7 +350,7 @@ class OutboxService {
   // ---------- Default HTTP executors ----------------------------------------
 
   Future<void> _defaultHttpMessageSender(MessagePayload p) async {
-    // If a socket is connected, prefer it for real-time send.
+    // Prefer socket for real-time send when connected.
     if (_socket != null && _socket!.connected) {
       final payload = {
         'text': p.text,
@@ -295,7 +378,7 @@ class OutboxService {
     final res = await http.post(
       uri,
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(body), // ✅ use standard encoder
+      body: jsonEncode(body),
     );
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
@@ -303,14 +386,15 @@ class OutboxService {
     }
   }
 
-  // Checklist: you must set an executor that matches your backend route.
-  // Example executor (adjust endpoint to your API):
+  /// Checklist HTTP executor builder (kept from earlier)
   static ChecklistExecutor buildHttpChecklistExecutor({
     required Future<String> Function() tokenProvider,
   }) {
     return (ChecklistPayload p) async {
       final token = await tokenProvider();
-      final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/outings/${p.outingId}/checklist');
+      final uri = Uri.parse(
+        '${AppConfig.apiBaseUrl}/api/outings/${p.outingId}/checklist',
+      );
       final body = {
         'itemId': p.itemId,
         'checked': p.checked,
@@ -322,7 +406,60 @@ class OutboxService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode(body), // ✅ use standard encoder
+        body: jsonEncode(body),
+      );
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        throw Exception('HTTP ${res.statusCode}: ${res.body}');
+      }
+    };
+  }
+
+  /// NEW: Outing create HTTP executor builder
+  static OutingCreateExecutor buildHttpOutingCreateExecutor({
+    required Future<String> Function() tokenProvider,
+  }) {
+    return (OutingCreatePayload p) async {
+      final token = await tokenProvider();
+      final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/outings');
+
+      // Keep fields minimal — align with your backend expectations.
+      final body = <String, dynamic>{
+        'title': p.title,
+        if (p.date != null) 'date': p.date!.toUtc().toIso8601String(),
+        if (p.location != null) 'locationName': p.location,
+        if (p.description != null) 'description': p.description,
+      };
+
+      final res = await http.post(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(body),
+      );
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        throw Exception('HTTP ${res.statusCode}: ${res.body}');
+      }
+    };
+  }
+
+  /// NEW: Outing update HTTP executor builder
+  static OutingUpdateExecutor buildHttpOutingUpdateExecutor({
+    required Future<String> Function() tokenProvider,
+  }) {
+    return (OutingUpdatePayload p) async {
+      final token = await tokenProvider();
+      final uri = Uri.parse(
+        '${AppConfig.apiBaseUrl}/api/outings/${p.outingId}',
+      );
+      final res = await http.patch(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(p.patch),
       );
       if (res.statusCode < 200 || res.statusCode >= 300) {
         throw Exception('HTTP ${res.statusCode}: ${res.body}');

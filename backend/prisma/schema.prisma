@@ -3,40 +3,89 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 
 model User {
-  id                     String   @id @default(uuid())
+  id                     String               @id @default(uuid())
   fullName               String
-  username               String?  @unique
-  email                  String   @unique
-  password               String
+  username               String?              @unique
+  email                  String               @unique
   profilePhotoUrl        String?
   bio                    String?
   homeLocation           String?
-  isProfilePublic        Boolean  @default(true)
-  showAvailability       Boolean  @default(false)
-  shareLocationByDefault Boolean  @default(false)
+  isProfilePublic        Boolean              @default(true)
+  showAvailability       Boolean              @default(false)
+  shareLocationByDefault Boolean              @default(false)
   defaultBudgetMin       Float?
   defaultBudgetMax       Float?
-  preferredOutingTypes   String[] @default([])
-  outingScore            Int      @default(0)
-  createdAt              DateTime @default(now())
+  preferredOutingTypes   String[]             @default([])
+  outingScore            Int                  @default(0)
+  createdAt              DateTime             @default(now())
+  password               String
+  fcmToken               String?
+  badges                 String[]             @default([])
+  allowPublicInvites     Boolean              @default(true)
+  phoneE164              String?              @unique
+  phoneVerifiedAt        DateTime?
+  availabilitySlots      AvailabilitySlot[]
+  calendarEntries        CalendarEntry[]
+  inContactsOf           Contact[]            @relation("UserIsContactOf")
+  contactsOwned          Contact[]            @relation("OwnerContacts")
+  expensesPaid           Expense[]            @relation("UserExpensesPaid")
+  favorites              Favorite[]
+  groupsCreated          Group[]              @relation("UserCreatedGroups")
+  groupInvitesToUser     GroupInvitation[]    @relation("InviteeUser")
+  groupInvitesSent       GroupInvitation[]    @relation("Inviter")
+  groups                 GroupMembership[]
+  invitesSent            InviteRequest[]      @relation("InviteSender")
+  invitesReceived        InviteRequest[]      @relation("InviteRecipient")
+  messagesReceived       Message[]            @relation("DirectMessages")
+  messagesSent           Message[]            @relation("Message_sender")
+  outingsHosted          Outing[]             @relation("Host")
+  contributions          OutingContribution[]
+  imagesUploaded         OutingImage[]        @relation("ImageUploader")
+  outingInvitesToUser    OutingInvite[]       @relation("InviteInvitee")
+  outingInvitesSent      OutingInvite[]       @relation("InviteInviter")
+  OutingParticipant      OutingParticipant[]
+  outingRSVPs            OutingUser[]
+  savedPlacesCreated     SavedPlace[]         @relation("UserSavedPlaces")
+}
 
-  messagesSent     Message[] @relation("Message_sender")
-  messagesReceived Message[] @relation("DirectMessages")
+model Contact {
+  id            String   @id @default(uuid())
+  ownerUserId   String
+  contactUserId String
+  label         String?
+  isBlocked     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  contact       User     @relation("UserIsContactOf", fields: [contactUserId], references: [id], onDelete: Cascade)
+  owner         User     @relation("OwnerContacts", fields: [ownerUserId], references: [id], onDelete: Cascade)
 
-  groups            GroupMembership[]
-  groupsCreated     Group[]              @relation("UserCreatedGroups")
-  outingsHosted     Outing[]             @relation("Host")
-  outingRSVPs       OutingUser[]
-  contributions     OutingContribution[]
-  availabilitySlots AvailabilitySlot[]
-  calendarEntries   CalendarEntry[]
+  @@unique([ownerUserId, contactUserId])
+  @@index([ownerUserId])
+  @@index([contactUserId])
+}
 
-  fcmToken  String? @db.Text   // NEW field for Firebase push tokens
+model InviteRequest {
+  id          String       @id @default(uuid())
+  fromUserId  String
+  toUserId    String
+  status      InviteStatus @default(PENDING)
+  source      InviteSource @default(contacts)
+  message     String?
+  createdAt   DateTime     @default(now())
+  respondedAt DateTime?
+  fromUser    User         @relation("InviteSender", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser      User         @relation("InviteRecipient", fields: [toUserId], references: [id], onDelete: Cascade)
+
+  @@unique([fromUserId, toUserId, status])
+  @@index([toUserId])
+  @@index([fromUserId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model Group {
@@ -45,57 +94,110 @@ model Group {
   description          String?
   createdAt            DateTime          @default(now())
   createdById          String
-  groupImageUrl        String?
   groupVisibility      String            @default("private")
   defaultBudgetMin     Float?
   defaultBudgetMax     Float?
   preferredOutingTypes String[]          @default([])
-  messages             Message[]
-  createdBy            User              @relation("UserCreatedGroups", fields: [createdById], references: [id])
-  members              GroupMembership[]
-  outings              Outing[]
+  coverImageUrl        String?
+  visibility           GroupVisibility   @default(private)
   calendarEntries      CalendarEntry[]
+  createdBy            User              @relation("UserCreatedGroups", fields: [createdById], references: [id])
+  invitations          GroupInvitation[]
+  members              GroupMembership[]
+  messages             Message[]
+  outings              Outing[]
+
+  @@index([createdById])
+  @@index([visibility])
 }
 
 model GroupMembership {
-  id      String  @id @default(uuid())
+  id      String    @id @default(uuid())
   userId  String
   groupId String
-  isAdmin Boolean @default(false)
+  isAdmin Boolean   @default(false)
+  role    GroupRole @default(member)
+  group   Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  user  User  @relation(fields: [userId], references: [id])
-  group Group @relation(fields: [groupId], references: [id])
+  @@unique([userId, groupId])
+  @@index([userId])
+  @@index([groupId])
+  @@index([role])
+}
+
+model GroupInvitation {
+  id            String       @id @default(uuid())
+  groupId       String
+  inviterId     String
+  inviteeUserId String?
+  inviteeEmail  String?
+  inviteeHandle String?
+  message       String?
+  status        InviteStatus @default(PENDING)
+  token         String?
+  expiresAt     DateTime?
+  createdAt     DateTime     @default(now())
+  respondedAt   DateTime?
+  group         Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  inviteeUser   User?        @relation("InviteeUser", fields: [inviteeUserId], references: [id])
+  inviter       User         @relation("Inviter", fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, inviteeUserId, status])
+  @@unique([groupId, inviteeEmail, status])
+  @@unique([groupId, inviteeHandle, status])
+  @@index([groupId])
+  @@index([inviterId])
+  @@index([inviteeUserId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model Outing {
-  id                  String   @id @default(uuid())
-  title               String
-  description         String?
-  outingType          String
-  createdAt           DateTime @default(now())
-  createdById         String
-  groupId             String?
-  locationName        String
-  latitude            Float
-  longitude           Float
-  address             String?
-  dateTimeStart       DateTime
-  dateTimeEnd         DateTime
-  budgetMin           Float?
-  budgetMax           Float?
-  piggyBankEnabled    Boolean  @default(false)
-  piggyBankTarget     Float?
-  checklist           String[]
-  suggestedItinerary  String?
-  liveLocationEnabled Boolean  @default(false)
-  isPublic            Boolean  @default(false)
+  id                    String               @id @default(uuid())
+  title                 String
+  description           String?
+  outingType            String
+  createdAt             DateTime             @default(now())
+  createdById           String
+  groupId               String?
+  locationName          String
+  latitude              Float
+  longitude             Float
+  address               String?
+  dateTimeStart         DateTime
+  dateTimeEnd           DateTime
+  budgetMin             Float?
+  budgetMax             Float?
+  piggyBankEnabled      Boolean              @default(false)
+  piggyBankTarget       Float?
+  checklist             String[]             @default([])
+  suggestedItinerary    String?
+  liveLocationEnabled   Boolean              @default(false)
+  isPublic              Boolean              @default(false)
+  piggyBankTargetCents  Int?
+  allowParticipantEdits Boolean              @default(false)
+  isPublished           Boolean              @default(false)
+  publishedAt           DateTime?
+  showOrganizer         Boolean              @default(true)
+  visibility            OutingVisibility     @default(INVITED)
+  calendarEntries       CalendarEntry[]      @relation("OutingCalendar")
+  expenses              Expense[]
+  favorites             Favorite[]
+  itineraryItems        ItineraryItem[]
+  createdBy             User                 @relation("Host", fields: [createdById], references: [id])
+  group                 Group?               @relation(fields: [groupId], references: [id])
+  contributions         OutingContribution[]
+  images                OutingImage[]
+  invites               OutingInvite[]
+  participants          OutingParticipant[]
+  rsvps                 OutingUser[]
 
-  createdBy       User                 @relation("Host", fields: [createdById], references: [id])
-  group           Group?               @relation(fields: [groupId], references: [id])
-  rsvps           OutingUser[]
-  contributions   OutingContribution[]
-  images          OutingImage[]
-  calendarEntries CalendarEntry[]      @relation("OutingCalendar")
+  @@index([groupId])
+  @@index([createdById])
+  @@index([dateTimeStart])
+  @@index([dateTimeEnd])
+  @@index([isPublished, visibility])
 }
 
 model OutingUser {
@@ -103,28 +205,99 @@ model OutingUser {
   userId     String
   outingId   String
   rsvpStatus String
+  outing     Outing @relation(fields: [outingId], references: [id], onDelete: Cascade)
+  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  user   User   @relation(fields: [userId], references: [id])
-  outing Outing @relation(fields: [outingId], references: [id])
+  @@index([userId])
+  @@index([outingId])
 }
 
 model OutingContribution {
-  id       String @id @default(uuid())
-  userId   String
-  outingId String
-  amount   Float
+  id          String   @id @default(uuid())
+  userId      String
+  outingId    String
+  amount      Float?
+  amountCents Int
+  createdAt   DateTime @default(now())
+  note        String?
+  outing      Outing   @relation(fields: [outingId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  user   User   @relation(fields: [userId], references: [id])
-  outing Outing @relation(fields: [outingId], references: [id])
+  @@index([outingId])
+  @@index([userId])
+  @@index([outingId, userId])
+}
+
+model Expense {
+  id          String   @id @default(uuid())
+  outingId    String
+  payerId     String
+  amountCents Int
+  description String?
+  category    String?
+  createdAt   DateTime @default(now())
+  outing      Outing   @relation(fields: [outingId], references: [id], onDelete: Cascade)
+  payer       User     @relation("UserExpensesPaid", fields: [payerId], references: [id], onDelete: Cascade)
+
+  @@index([outingId])
+  @@index([payerId])
 }
 
 model OutingImage {
-  id          String @id @default(uuid())
+  id          String        @id @default(uuid())
   outingId    String
   imageUrl    String
   imageSource String
+  authorLink  String?
+  authorName  String?
+  blurHash    String?
+  createdAt   DateTime      @default(now())
+  height      Int?
+  provider    ImageProvider @default(external)
+  publicId    String?
+  unsplashId  String?
+  uploaderId  String?
+  width       Int?
+  outing      Outing        @relation(fields: [outingId], references: [id], onDelete: Cascade)
+  uploader    User?         @relation("ImageUploader", fields: [uploaderId], references: [id])
 
-  outing Outing @relation(fields: [outingId], references: [id])
+  @@index([outingId])
+  @@index([provider])
+  @@index([uploaderId])
+  @@index([createdAt])
+}
+
+model Favorite {
+  id        String   @id @default(uuid())
+  userId    String
+  outingId  String
+  createdAt DateTime @default(now())
+  outing    Outing   @relation(fields: [outingId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, outingId])
+  @@index([userId])
+  @@index([outingId])
+}
+
+model ItineraryItem {
+  id           String    @id @default(uuid())
+  outingId     String
+  orderIndex   Int       @default(0)
+  title        String
+  notes        String?
+  locationName String?
+  latitude     Float?
+  longitude    Float?
+  startTime    DateTime?
+  endTime      DateTime?
+  createdAt    DateTime  @default(now())
+  outing       Outing    @relation(fields: [outingId], references: [id], onDelete: Cascade)
+
+  @@index([outingId])
+  @@index([orderIndex])
+  @@index([startTime])
+  @@index([endTime])
 }
 
 model AvailabilitySlot {
@@ -136,8 +309,11 @@ model AvailabilitySlot {
   repeatPattern String?
   notes         String?
   createdAt     DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  user User @relation(fields: [userId], references: [id])
+  @@index([userId])
+  @@index([dateTimeStart])
+  @@index([dateTimeEnd])
 }
 
 model CalendarEntry {
@@ -152,25 +328,140 @@ model CalendarEntry {
   linkedOutingId  String?
   groupId         String?
   createdAt       DateTime @default(now())
+  user            User     @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
+  group           Group?   @relation(fields: [groupId], references: [id])
+  outing          Outing?  @relation("OutingCalendar", fields: [linkedOutingId], references: [id])
 
-  user   User    @relation(fields: [createdByUserId], references: [id])
-  group  Group?  @relation(fields: [groupId], references: [id])
-  outing Outing? @relation("OutingCalendar", fields: [linkedOutingId], references: [id])
+  @@index([createdByUserId])
+  @@index([groupId])
+  @@index([linkedOutingId])
 }
 
 model Message {
-  id          String   @id @default(uuid())
+  id          String      @id @default(uuid())
   text        String
   senderId    String
   groupId     String?
   recipientId String?
-  isRead      Boolean  @default(false)
-  createdAt   DateTime @default(now())
-
-  sender    User   @relation("Message_sender", fields: [senderId], references: [id])
-  recipient User?  @relation("DirectMessages", fields: [recipientId], references: [id])
-  group     Group? @relation(fields: [groupId], references: [id])
+  isRead      Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  fileName    String?
+  fileSize    Int?
+  mediaUrl    String?
+  /// NEW fields for richer messaging
+  messageType MessageType @default(text)
+  readAt      DateTime?
+  group       Group?      @relation(fields: [groupId], references: [id])
+  recipient   User?       @relation("DirectMessages", fields: [recipientId], references: [id])
+  sender      User        @relation("Message_sender", fields: [senderId], references: [id])
 
   @@index([groupId])
   @@index([recipientId])
+  @@index([senderId])
+  @@index([createdAt])
+}
+
+model OutingParticipant {
+  id          String          @id @default(uuid())
+  outingId    String
+  userId      String
+  role        ParticipantRole @default(PARTICIPANT)
+  permissions Int             @default(0)
+  createdAt   DateTime        @default(now())
+  outing      Outing          @relation(fields: [outingId], references: [id], onDelete: Cascade)
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([outingId, userId])
+  @@index([userId])
+}
+
+model OutingInvite {
+  id             String          @id @default(uuid())
+  outingId       String
+  inviterId      String
+  inviteeUserId  String?
+  inviteeContact String?
+  role           ParticipantRole @default(PARTICIPANT)
+  status         InviteStatus    @default(PENDING)
+  code           String          @unique
+  expiresAt      DateTime?
+  createdAt      DateTime        @default(now())
+  invitee        User?           @relation("InviteInvitee", fields: [inviteeUserId], references: [id])
+  inviter        User            @relation("InviteInviter", fields: [inviterId], references: [id], onDelete: Cascade)
+  outing         Outing          @relation(fields: [outingId], references: [id], onDelete: Cascade)
+
+  @@index([inviteeUserId])
+  @@index([outingId])
+  @@index([outingId, status])
+  @@index([outingId, inviteeUserId, status])
+  @@index([outingId, inviteeContact, status])
+}
+
+model SavedPlace {
+  id          String   @id @default(uuid())
+  name        String
+  address     String?
+  latitude    Float
+  longitude   Float
+  isVerified  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  createdById String
+  createdBy   User     @relation("UserSavedPlaces", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@unique([name, latitude, longitude])
+  @@index([name])
+  @@index([createdById])
+  @@index([latitude, longitude])
+}
+
+enum ImageProvider {
+  cloudinary
+  unsplash
+  external
+}
+
+enum GroupVisibility {
+  private
+  public
+  invite_only
+}
+
+enum GroupRole {
+  admin
+  member
+}
+
+/// * NEW: Source of an invite request (outside of groups)
+enum InviteSource {
+  contacts
+  public_feed
+  other
+}
+
+enum OutingVisibility {
+  PUBLIC
+  CONTACTS
+  INVITED
+  GROUPS
+}
+
+enum ParticipantRole {
+  OWNER
+  PARTICIPANT
+  VIEWER
+}
+
+/// * MAPPED enum so existing DB strings continue to work.
+enum InviteStatus {
+  PENDING  @map("pending")
+  ACCEPTED @map("accepted")
+  DECLINED @map("declined")
+  CANCELED @map("canceled")
+}
+
+/// NEW: Message content types
+enum MessageType {
+  text
+  image
+  file
 }

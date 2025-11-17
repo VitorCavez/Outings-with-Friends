@@ -24,8 +24,9 @@
     "prisma:deploy": "prisma migrate deploy --schema backend/prisma/schema.prisma --env-file backend/.env",
     "prisma:reset": "prisma migrate reset -f --schema backend/prisma/schema.prisma --env-file backend/.env",
     "prisma:generate": "prisma generate --schema backend/prisma/schema.prisma --env-file backend/.env",
+    "migrate:dev": "prisma migrate dev --schema backend/prisma/schema.prisma --env-file backend/.env",
 
-    "db:reset": "prisma migrate reset -f --schema backend/prisma/schema.prisma --dotenv-file backend/.env",
+    "db:reset": "prisma migrate reset -f --schema backend/prisma/schema.prisma --env-file backend/.env",
     "db:seed": "node backend/prisma/seed.js",
     "db:reset-seed": "npm run db:reset && npm run db:seed"
   },
@@ -68,7 +69,6 @@
     "supertest": "^7.1.4"
   },
   "prisma": {
-    "schema": "backend/prisma/schema.prisma",
     "seed": "node backend/prisma/seed.js"
   }
 }

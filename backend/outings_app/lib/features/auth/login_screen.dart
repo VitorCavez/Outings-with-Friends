@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -33,14 +32,17 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      final result = await AuthApi.login(email, password);
-      // result typically contains { token, user: { id, ... } }
-      // TODO: securely persist token if needed
+      // AuthApi.login is an INSTANCE method with NAMED parameters.
+      final result = await AuthApi().login(email: email, password: password);
+      // TODO: securely persist result.token if needed
 
       if (!mounted) return;
       context.go('/home');
-    } on AuthException catch (e) {
-      setState(() => _errorMessage = e.message);
+    } on Exception catch (e) {
+      // If your AuthApi throws custom exceptions later, you can refine this.
+      setState(
+        () => _errorMessage = e.toString().replaceFirst('Exception: ', ''),
+      );
     } catch (_) {
       setState(
         () => _errorMessage = 'Could not reach the server. Please try again.',

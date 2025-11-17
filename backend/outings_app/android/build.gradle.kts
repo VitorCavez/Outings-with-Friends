@@ -1,15 +1,18 @@
-// backend/outings_app/android/build.gradle.kts
+// android/build.gradle.kts
 
 plugins {
-    // Google Services (Firebase) — declared at root, applied in :app
-    id("com.google.gms.google-services") version "4.4.2" apply false
+    id("com.google.gms.google-services") apply false
 }
 
-allprojects {
-    repositories {
-        google()
-        mavenCentral()
-    }
+// Put all repositories in settings.gradle.kts (we already did)
+
+val newBuildDir: Directory = rootProject.layout.buildDirectory.dir("../../build").get()
+rootProject.layout.buildDirectory.value(newBuildDir)
+
+subprojects {
+    val newSubBuildDir: Directory = newBuildDir.dir(project.name)
+    layout.buildDirectory.value(newSubBuildDir)
+    evaluationDependsOn(":app")
 }
 
 tasks.register<Delete>("clean") {

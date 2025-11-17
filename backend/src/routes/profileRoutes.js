@@ -6,6 +6,9 @@ const router = express.Router();
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
+const { requireAuth } = require('../middleware/auth');
+const { normalizePhone } = require('../utils/phone');
+
 /**
  * GET /api/users/:userId/history
  * Past outings the user hosted or RSVP'd to (dateTimeEnd < now).
@@ -186,18 +189,6 @@ router.get('/api/users/:userId/timeline', async (req, res) => {
 /**
  * GET /api/users/:userId/favorites
  * Placeholder — returns 501 until a small favorites table is added.
- *
- * Proposed model (Prisma):
- * model Favorite {
- *   id        String   @id @default(uuid())
- *   userId    String
- *   outingId  String
- *   createdAt DateTime @default(now())
- *   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
- *   outing Outing @relation(fields: [outingId], references: [id], onDelete: Cascade)
- *   @@unique([userId, outingId])
- *   @@index([outingId])
- * }
  */
 router.get('/api/users/:userId/favorites', async (req, res) => {
   res.status(501).json({
@@ -208,24 +199,81 @@ router.get('/api/users/:userId/favorites', async (req, res) => {
   });
 });
 
-const express = require('express');
-const router = express.Router();
-
-router.get('/api/profile/me', async (req, res) => {
+/**
+ * PUT /api/users/me/profile-visibility
+ * body: { isProfilePublic?: boolean, allowPublicInvites?: boolean }
+ * Updates visibility toggles for the authenticated user.
+ */
+router.put('/api/users/me/profile-visibility', requireAuth, async (req, res) => {
   try {
-    res.json({ id: null, name: null, avatarUrl: null });
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ error: 'unauthorized' });
+
+    const data = {};
+    if (typeof req.body.isProfilePublic === 'boolean') {
+      data.isProfilePublic = req.body.isProfilePublic;
+    }
+    if (typeof req.body.allowPublicInvites === 'boolean') {
+      data.allowPublicInvites = req.body.allowPublicInvites;
+    }
+
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ error: 'no_changes', message: 'Provide isProfilePublic and/or allowPublicInvites.' });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data,
+      select: {
+        id: true,
+        isProfilePublic: true,
+        allowPublicInvites: true,
+      },
+    });
+
+    return res.json({ ok: true, user: updated });
   } catch (err) {
-    console.error('profileRoutes error:', err);
-    res.status(500).json({ error: 'Failed to load profile' });
+    console.error('profile-visibility update error:', err);
+    return res.status(500).json({ error: 'server_error' });
   }
 });
 
-router.patch('/api/profile/me', async (req, res) => {
+/**
+ * PUT /api/users/me/phone
+ * body: { phone: string, defaultCountryCode?: string }
+ * Sets or updates the authenticated user’s E.164 phone number.
+ */
+router.put('/api/users/me/phone', requireAuth, async (req, res) => {
   try {
-    res.json({ ok: true, updated: req.body || {} });
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ error: 'unauthorized' });
+
+    const { phone, defaultCountryCode } = req.body || {};
+    const norm = normalizePhone(phone, { defaultCountryCode });
+
+    if (!norm.e164) {
+      return res.status(400).json({ error: 'invalid_phone', reason: norm.reason || 'normalize_failed' });
+    }
+
+    // Ensure phone not used by another user
+    const existing = await prisma.user.findFirst({
+      where: { phoneE164: norm.e164, NOT: { id: userId } },
+      select: { id: true },
+    });
+    if (existing) {
+      return res.status(409).json({ error: 'phone_in_use' });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: { phoneE164: norm.e164 },
+      select: { id: true, phoneE164: true },
+    });
+
+    return res.json({ ok: true, user: updated });
   } catch (err) {
-    console.error('profileRoutes update error:', err);
-    res.status(500).json({ error: 'Failed to update profile' });
+    console.error('phone update error:', err);
+    return res.status(500).json({ error: 'server_error' });
   }
 });
 

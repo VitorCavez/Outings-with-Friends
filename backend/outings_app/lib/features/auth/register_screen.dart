@@ -21,7 +21,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   String? _error;
 
   Future<void> _register() async {
-    final fullName = _nameController.text.trim(); // <-- call it fullName here
+    final fullName = _nameController.text.trim();
     final email = _emailController.text.trim();
     final password = _passwordController.text;
 
@@ -36,20 +36,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
     });
 
     try {
-      // Backend expects { fullName, email, password }
-      await AuthApi.register({
-        'fullName': fullName, // <-- key changed from 'name' to 'fullName'
-        'email': email,
-        'password': password,
-      });
+      // Match the instance + named-params pattern used in login.
+      await AuthApi().register(
+        fullName: fullName,
+        email: email,
+        password: password,
+      );
 
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Registration successful')));
       context.go('/home');
-    } on AuthException catch (e) {
-      setState(() => _error = e.message);
+    } on Exception catch (e) {
+      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
     } catch (_) {
       setState(() => _error = 'Could not reach the server. Please try again.');
     } finally {
@@ -68,6 +68,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           children: [
             const Text('Register', style: TextStyle(fontSize: 24)),
             const SizedBox(height: 8),
+            // Show base URL to confirm dart-define is applied
             Text(
               base,
               style: const TextStyle(fontSize: 12, color: Colors.grey),

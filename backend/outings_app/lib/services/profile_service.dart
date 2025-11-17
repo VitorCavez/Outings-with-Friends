@@ -1,6 +1,7 @@
 // lib/services/profile_service.dart
 import 'dart:convert';
 import 'package:intl/intl.dart';
+
 import '../models/user_profile.dart';
 import 'api_client.dart';
 
@@ -39,7 +40,8 @@ class ProfileService {
       if (bio != null) 'bio': bio,
       if (homeLocation != null) 'homeLocation': homeLocation,
       if (isProfilePublic != null) 'isProfilePublic': isProfilePublic,
-      if (preferredOutingTypes != null) 'preferredOutingTypes': preferredOutingTypes,
+      if (preferredOutingTypes != null)
+        'preferredOutingTypes': preferredOutingTypes,
       if (profilePhotoUrl != null) 'profilePhotoUrl': profilePhotoUrl,
       if (badges != null) 'badges': badges,
     };
@@ -62,12 +64,48 @@ class ProfileService {
       throw Exception('Get favorites failed (${r.statusCode})');
     }
     final map = jsonDecode(r.body) as Map<String, dynamic>;
-    return (map['data'] as List).cast<Map<String, dynamic>>();
+    final raw = (map['data'] as List);
+    return raw
+        .where((e) => e is Map)
+        .map<Map<String, dynamic>>((e) => (e as Map).cast<String, dynamic>())
+        .toList();
   }
 
   // -----------------------------
   // NEW (Phase 6): History + Timeline
   // -----------------------------
+
+  /// Convenience wrapper used by `OutingHistoryList`.
+  /// Returns items as plain maps with the keys your widget expects.
+  Future<List<Map<String, dynamic>>> getUserHistory({
+    required String userId,
+    String role = 'all', // 'all' | 'host' | 'guest'
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final resp = await fetchHistory(
+      userId,
+      role: role,
+      limit: limit,
+      offset: offset,
+    );
+
+    return resp.items.map((it) {
+      return <String, dynamic>{
+        'id': it.id,
+        'title': it.title,
+        'outingType': it.outingType,
+        'locationName': it.locationName,
+        'address': it.address,
+        'dateTimeStart': it.dateTimeStart?.toIso8601String(),
+        'dateTimeEnd': it.dateTimeEnd?.toIso8601String(),
+        'createdById': it.createdById,
+        'groupId': it.groupId,
+        'role': it.role,
+        'rsvpStatus': it.rsvpStatus,
+      };
+    }).toList();
+  }
 
   /// GET /api/users/:userId/history?role=all|host|guest&limit=&offset=
   Future<ProfileHistoryResponse> fetchHistory(
@@ -78,11 +116,7 @@ class ProfileService {
   }) async {
     final r = await api.get(
       '/api/users/$userId/history',
-      query: {
-        'role': role,
-        'limit': limit,
-        'offset': offset,
-      },
+      query: {'role': role, 'limit': limit, 'offset': offset},
     );
     if (r.statusCode != 200) {
       throw Exception('History failed (${r.statusCode})');
@@ -117,6 +151,56 @@ class ProfileService {
     final map = jsonDecode(r.body) as Map<String, dynamic>;
     return ProfileTimelineResponse.fromJson(map);
   }
+
+  /// 🔹 Wrapper for widgets (e.g. TripTimelineList) that expect a simple
+  /// `List<Map<String,dynamic>>`. It maps the typed DTOs returned by
+  /// `fetchTimeline(...)` into the exact keys your UI reads:
+  ///  - title, description, dateTimeStart, dateTimeEnd
+  ///  - linkedOuting (map with id/title/outingType/... when present)
+  Future<List<Map<String, dynamic>>> getUserTimeline({
+    required String userId,
+    int limit = 50,
+    int offset = 0,
+    DateTime? from,
+    DateTime? to,
+  }) async {
+    final resp = await fetchTimeline(
+      userId,
+      fromIso: from?.toUtc().toIso8601String(),
+      toIso: to?.toUtc().toIso8601String(),
+      limit: limit,
+      offset: offset,
+    );
+
+    return resp.items.map((e) {
+      Map<String, dynamic>? linked;
+      if (e.linkedOuting != null) {
+        linked = {
+          'id': e.linkedOuting!.id,
+          'title': e.linkedOuting!.title,
+          'outingType': e.linkedOuting!.outingType,
+          'locationName': e.linkedOuting!.locationName,
+          'address': e.linkedOuting!.address,
+          'dateTimeStart': e.linkedOuting!.dateTimeStart?.toIso8601String(),
+          'dateTimeEnd': e.linkedOuting!.dateTimeEnd?.toIso8601String(),
+        };
+      }
+
+      return <String, dynamic>{
+        'id': e.id,
+        'title': e.title,
+        'description': e.description,
+        'dateTimeStart': e.dateTimeStart.toIso8601String(),
+        'dateTimeEnd': e.dateTimeEnd.toIso8601String(),
+        'isAllDay': e.isAllDay,
+        'isReminder': e.isReminder,
+        'linkedOutingId': e.linkedOutingId,
+        'groupId': e.groupId,
+        'createdAt': e.createdAt?.toIso8601String(),
+        if (linked != null) 'linkedOuting': linked,
+      };
+    }).toList();
+  }
 }
 
 // =============================
@@ -146,8 +230,8 @@ class ProfileHistoryItem {
   final DateTime? dateTimeEnd;
   final String createdById;
   final String? groupId;
-  final String? role;        // host | guest
-  final String? rsvpStatus;  // going | maybe | etc.
+  final String? role; // host | guest
+  final String? rsvpStatus; // going | maybe | etc.
 
   factory ProfileHistoryItem.fromJson(Map<String, dynamic> j) {
     DateTime? _dt(dynamic v) => v == null ? null : DateTime.parse(v.toString());
@@ -271,10 +355,14 @@ class TimelineEntry {
       isReminder: j['isReminder'] == true,
       linkedOutingId: j['linkedOutingId'] as String?,
       groupId: j['groupId'] as String?,
-      createdAt: j['createdAt'] != null ? DateTime.parse(j['createdAt'].toString()) : null,
+      createdAt: j['createdAt'] != null
+          ? DateTime.parse(j['createdAt'].toString())
+          : null,
       linkedOuting: (j['linkedOuting'] == null)
           ? null
-          : LinkedOutingSnapshot.fromJson(j['linkedOuting'] as Map<String, dynamic>),
+          : LinkedOutingSnapshot.fromJson(
+              j['linkedOuting'] as Map<String, dynamic>,
+            ),
     );
   }
 }

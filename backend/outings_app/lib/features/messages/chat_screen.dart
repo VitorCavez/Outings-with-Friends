@@ -1,3 +1,4 @@
+// lib/features/messages/chat_screen.dart
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -9,14 +10,24 @@ import 'package:outings_app/services/upload_service.dart';
 import 'package:outings_app/utils/debouncer.dart';
 import 'package:outings_app/models/message.dart';
 import 'package:outings_app/features/messages/messages_repository.dart';
-import 'package:outings_app/config/app_config.dart';
-import 'messages_repository.dart';
+
+// Friendly names from ContactsProvider cache
+import 'package:outings_app/features/contacts/display_name.dart';
+
 import 'chat_state.dart';
-import 'widgets/message_bubble.dart';
+// Hide Container to avoid name clash with Flutter's Container.
+import 'widgets/message_bubble.dart' hide Container;
 import 'widgets/date_divider.dart';
 import 'widgets/new_messages_divider.dart';
 
-// History base URL now comes from repository via AppConfig.
+// Group title
+import 'package:outings_app/services/group_service.dart';
+import 'package:outings_app/services/api_client.dart';
+import 'package:outings_app/config/app_config.dart';
+import 'package:outings_app/features/auth/auth_provider.dart';
+
+// Brand tokens (ThemeExtension)
+import 'package:outings_app/theme/app_theme.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -36,9 +47,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
   late final MessagesRepository _repo = MessagesRepository();
 
-  StreamSubscription<bool>? _connSub;
-  bool _offline = false;
-
   bool _canSend = false;
   bool _peerOnline = false;
   bool _showJumpDown = false;
@@ -46,24 +54,75 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _newMarkerId;
   bool _initialLoaded = false;
 
-  // ---- socket event handlers ----
+  // group title (for app bar)
+  String? _groupTitle;
+
+  ApiClient _api() {
+    String? token;
+    try {
+      final auth = context.read<AuthProvider>();
+      final dyn = auth as dynamic;
+      token = (dyn.authToken ?? dyn.token) as String?;
+    } catch (_) {}
+    return ApiClient(baseUrl: AppConfig.apiBaseUrl, authToken: token);
+  }
+
+  Future<void> _loadGroupTitleIfNeeded() async {
+    final chat = context.read<ChatState>();
+    final gid = chat.groupId;
+    if (gid == null) return;
+    try {
+      final svc = GroupService(_api());
+      final g = await svc.getGroup(gid); // tolerates {ok,data} or raw
+      setState(() {
+        _groupTitle = (g['name'] as String?) ?? gid;
+      });
+    } catch (_) {
+      setState(() => _groupTitle = gid);
+    }
+  }
+
+  // ---- socket handlers ------------------------------------------------------
+
   void _onReceive(dynamic data) {
+    if (!mounted) return;
     final chat = context.read<ChatState>();
     final map = Map<String, dynamic>.from(data as Map);
     final msg = Message.fromMap(map, chat.currentUserId);
 
-    final atBottom = _scroll.hasClients &&
-        _scroll.position.pixels >= _scroll.position.maxScrollExtent - 12;
+    final atBottom = _isAtBottom(threshold: 80);
 
     if (!atBottom && _newMarkerId == null) {
       _newMarkerId = msg.id;
     }
 
+    // Update visible thread
     chat.addIncoming(msg);
-    if (atBottom) _scheduleScrollToBottom();
+
+    // Warm local recents cache for GROUP threads
+    if (chat.groupId != null && msg.groupId == chat.groupId) {
+      _repo.upsertGroupOne(chat.groupId!, msg);
+    }
+
+    // DM-specific handling
+    if (chat.peerUserId != null) {
+      final peer = chat.peerUserId!;
+
+      if (!msg.isMine) {
+        _repo.markThreadSeen(peer);
+        if (!_readSent.contains(msg.id)) {
+          _socket.sendRead(msg.id);
+          _readSent.add(msg.id);
+        }
+      }
+      _repo.upsertOne(peer, msg);
+    }
+
+    if (atBottom || msg.isMine) _scheduleScrollToBottom();
   }
 
   void _onTyping(dynamic data) {
+    if (!mounted) return;
     final chat = context.read<ChatState>();
     final map = Map<String, dynamic>.from(data as Map);
     final isTyping = (map['isTyping'] ?? false) as bool;
@@ -71,6 +130,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _onMessageRead(dynamic data) {
+    if (!mounted) return;
     final chat = context.read<ChatState>();
     final map = Map<String, dynamic>.from(data as Map);
     final messageId = (map['messageId'] ?? '').toString();
@@ -78,20 +138,46 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _onPresence(dynamic data) {
+    if (!mounted) return;
+    final chat = context.read<ChatState>();
     final map = Map<String, dynamic>.from(data as Map);
+    final userId = (map['userId'] ?? '').toString();
     final isOnline = (map['online'] ?? false) as bool;
-    setState(() => _peerOnline = isOnline);
+    if (chat.peerUserId != null && userId == chat.peerUserId) {
+      setState(() => _peerOnline = isOnline);
+    }
   }
 
   @override
   void initState() {
     super.initState();
-    _socket.initSocket();
+
+    final chat = context.read<ChatState>();
+    _socket.initSocket(userId: chat.currentUserId);
 
     _socket.on('receive_message', _onReceive);
     _socket.on('typing', _onTyping);
     _socket.on('message_read', _onMessageRead);
     _socket.on('presence', _onPresence);
+
+    // Join group room when opening a group chat
+    if (chat.groupId != null && chat.groupId!.isNotEmpty) {
+      _socket.joinGroup(chat.groupId!);
+      _repo.setActiveGroup(chat.groupId);
+    } else {
+      _repo.setActiveGroup(null);
+    }
+
+    // Mark DM thread as active & clear unseen
+    if (chat.peerUserId != null) {
+      _repo.setActivePeer(chat.peerUserId);
+      _repo.markThreadSeen(chat.peerUserId!);
+    } else {
+      _repo.setActivePeer(null);
+    }
+
+    // Load group title
+    _loadGroupTitleIfNeeded();
 
     _controller.addListener(() {
       final next = _controller.text.trim().isNotEmpty;
@@ -99,8 +185,7 @@ class _ChatScreenState extends State<ChatScreen> {
     });
 
     _scroll.addListener(() {
-      if (!_scroll.hasClients) return;
-      final atBottom = _scroll.position.pixels >= _scroll.position.maxScrollExtent - 12;
+      final atBottom = _isAtBottom(threshold: 80);
       setState(() {
         _showJumpDown = !atBottom;
         if (atBottom) _newMarkerId = null;
@@ -111,17 +196,62 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     });
 
+    if (chat.peerUserId != null) {
+      _socket.queryPresence(chat.peerUserId!);
+    }
+
+    // Warm UI from local cache immediately, then fetch from server.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _loadInitialHistory();
+      if (!mounted) return;
+      final chat2 = context.read<ChatState>();
+
+      final cached = _repo.getCachedDm(chat2.peerUserId ?? '');
+      if (cached.isNotEmpty) {
+        chat2.addHistory(cached, prepend: true);
+        _scheduleScrollToBottom();
+      }
+
+      if (chat2.peerUserId != null) {
+        _repo.markThreadSeen(chat2.peerUserId!);
+      }
+      _sendReadForVisible();
+
+      _loadInitialHistory();
     });
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final chat = context.read<ChatState>();
+    if (chat.peerUserId != null) {
+      _repo.setActivePeer(chat.peerUserId);
+      _repo.markThreadSeen(chat.peerUserId!);
+      _socket.queryPresence(chat.peerUserId!);
+    }
+    if (chat.groupId != null) {
+      _repo.setActiveGroup(chat.groupId);
+    }
+  }
+
+  @override
   void dispose() {
+    final chat = context.read<ChatState>();
+    if (chat.peerUserId != null) {
+      _repo.markThreadSeen(chat.peerUserId!);
+    }
+    _repo.setActivePeer(null);
+
+    if (chat.groupId != null && chat.groupId!.isNotEmpty) {
+      _socket.leaveGroup(chat.groupId!);
+    }
+    _repo.setActiveGroup(null);
+
     _socket.off('receive_message', _onReceive);
     _socket.off('typing', _onTyping);
     _socket.off('message_read', _onMessageRead);
     _socket.off('presence', _onPresence);
+
     _debouncer.dispose();
     _controller.dispose();
     _inputFocus.dispose();
@@ -129,13 +259,12 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
-  // ---- history & pagination ----
+  // ---- history & pagination -------------------------------------------------
 
   Future<void> _loadInitialHistory() async {
-    if (!mounted) return;
-    final chat = context.read<ChatState>();
-    if (_initialLoaded) return;
+    if (!mounted || _initialLoaded) return;
     _initialLoaded = true;
+    final chat = context.read<ChatState>();
 
     try {
       chat.setFetchingHistory(true);
@@ -147,6 +276,15 @@ class _ChatScreenState extends State<ChatScreen> {
         limit: 25,
       );
       chat.addHistory(page.items, prepend: true);
+
+      if (chat.peerUserId != null) {
+        _repo.putDmMessages(chat.peerUserId!, page.items, prepend: true);
+        _repo.markThreadSeen(chat.peerUserId!);
+      }
+      if (chat.groupId != null) {
+        _repo.putGroupMessages(chat.groupId!, page.items, prepend: true);
+      }
+
       chat.setNextCursor(page.nextCursor);
       _scheduleScrollToBottom();
     } catch (e) {
@@ -174,6 +312,14 @@ class _ChatScreenState extends State<ChatScreen> {
       );
 
       final added = chat.addHistory(page.items, prepend: true);
+
+      if (chat.peerUserId != null) {
+        _repo.putDmMessages(chat.peerUserId!, page.items, prepend: true);
+      }
+      if (chat.groupId != null) {
+        _repo.putGroupMessages(chat.groupId!, page.items, prepend: true);
+      }
+
       chat.setNextCursor(page.nextCursor);
 
       if (added > 0) {
@@ -188,7 +334,8 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  // ---- UI helpers ----
+  // ---- sending / typing -----------------------------------------------------
+
   void _sendMessage() {
     final chat = context.read<ChatState>();
     final text = _controller.text.trim();
@@ -203,7 +350,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
 
     final optimistic = Message(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      id: 'tmp_${DateTime.now().microsecondsSinceEpoch}!',
       text: text,
       senderId: chat.currentUserId,
       recipientId: chat.peerUserId,
@@ -214,6 +361,12 @@ class _ChatScreenState extends State<ChatScreen> {
       messageType: 'text',
     );
     chat.addOutgoing(optimistic);
+
+    if (chat.groupId != null) {
+      _repo.upsertGroupOne(chat.groupId!, optimistic);
+    } else if (chat.peerUserId != null) {
+      _repo.upsertOne(chat.peerUserId!, optimistic);
+    }
 
     _controller.clear();
     setState(() => _canSend = false);
@@ -229,7 +382,6 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _pickAndSendAttachment() async {
     final chat = context.read<ChatState>();
 
-    // 1) Pick (allow images and files)
     final res = await FilePicker.platform.pickFiles(
       allowMultiple: false,
       type: FileType.any,
@@ -244,11 +396,10 @@ class _ChatScreenState extends State<ChatScreen> {
     final file = File(path);
     final isImage = _isImageExtension(picked.extension);
 
-    // 2) Optimistic bubble (with temporary "uploading" text)
     final tempId = 'tmp_${DateTime.now().microsecondsSinceEpoch}';
     final optimistic = Message(
       id: tempId,
-      text: isImage ? '[image]' : (picked.name ?? '[file]'),
+      text: isImage ? '[image]' : (picked.name),
       senderId: chat.currentUserId,
       recipientId: chat.peerUserId,
       groupId: chat.groupId,
@@ -256,20 +407,25 @@ class _ChatScreenState extends State<ChatScreen> {
       isRead: false,
       isMine: true,
       messageType: isImage ? 'image' : 'file',
-      mediaUrl: null, // to be filled after upload
+      mediaUrl: null,
       fileName: picked.name,
       fileSize: picked.size,
     );
     chat.addOutgoing(optimistic);
+
+    if (chat.groupId != null) {
+      _repo.upsertGroupOne(chat.groupId!, optimistic);
+    } else if (chat.peerUserId != null) {
+      _repo.upsertOne(chat.peerUserId!, optimistic);
+    }
+
     _scheduleScrollToBottom();
 
     try {
-      // 3) Upload
       final up = await _uploader.uploadFile(file);
-
-      // 4) Send via socket
+      if (!mounted) return;
       _socket.sendMessage(
-        text: isImage ? '' : (picked.name ?? ''),
+        text: isImage ? '' : (picked.name),
         senderId: chat.currentUserId,
         recipientId: chat.peerUserId,
         groupId: chat.groupId,
@@ -278,24 +434,29 @@ class _ChatScreenState extends State<ChatScreen> {
         fileName: up.fileName ?? picked.name,
         fileSize: up.fileSize ?? picked.size,
       );
-
-      // (Optional) You could replace the optimistic message with a final one if you had server id
-      // For now, the "official" message will arrive via socket from backend and show up naturally.
     } catch (e) {
       debugPrint('Upload failed: $e');
-      // (Optional) show a snackbar
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Upload failed')),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Upload failed',
+            style: TextStyle(color: Theme.of(context).colorScheme.onError),
+          ),
+        ),
+      );
     }
   }
 
   bool _isImageExtension(String? ext) {
     final e = (ext ?? '').toLowerCase();
-    return e == 'png' || e == 'jpg' || e == 'jpeg' || e == 'gif' || e == 'webp' || e == 'bmp' || e == 'heic';
-    // Render side uses messageType anyway; this is just for optimistic label.
+    return e == 'png' ||
+        e == 'jpg' ||
+        e == 'jpeg' ||
+        e == 'gif' ||
+        e == 'webp' ||
+        e == 'bmp' ||
+        e == 'heic';
   }
 
   void _maybeEmitTyping(String value) {
@@ -317,6 +478,17 @@ class _ChatScreenState extends State<ChatScreen> {
         _readSent.add(m.id);
       }
     }
+    if (chat.peerUserId != null) {
+      _repo.markThreadSeen(chat.peerUserId!);
+    }
+  }
+
+  // ---- scrolling helpers ----------------------------------------------------
+
+  bool _isAtBottom({double threshold = 12}) {
+    if (!_scroll.hasClients) return true;
+    final pos = _scroll.position;
+    return pos.pixels >= (pos.maxScrollExtent - threshold);
   }
 
   void _scheduleScrollToBottom() {
@@ -344,7 +516,13 @@ class _ChatScreenState extends State<ChatScreen> {
     return count;
   }
 
-  DateTime _dayKey(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
+  // Fallback initials when we don’t have a name
+  String _initialsFromId(String raw) {
+    final clean = raw.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+    if (clean.length >= 2) return clean.substring(0, 2).toUpperCase();
+    if (clean.isNotEmpty) return clean[0].toUpperCase();
+    return '🙂';
+  }
 
   String _labelForDate(DateTime dt) {
     final now = DateTime.now();
@@ -353,15 +531,21 @@ class _ChatScreenState extends State<ChatScreen> {
     final diff = d.difference(today).inDays;
     if (diff == 0) return 'Today';
     if (diff == -1) return 'Yesterday';
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
     return '${dt.day} ${months[dt.month - 1]} ${dt.year}';
-  }
-
-  String _initialsFromId(String raw) {
-    final clean = raw.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
-    if (clean.length >= 2) return clean.substring(0, 2).toUpperCase();
-    if (clean.isNotEmpty) return clean[0].toUpperCase();
-    return '🙂';
   }
 
   @override
@@ -369,26 +553,49 @@ class _ChatScreenState extends State<ChatScreen> {
     final chat = context.watch<ChatState>();
     final messages = chat.messages;
 
+    final c = Theme.of(context).colorScheme;
+    final brand = Theme.of(context).extension<BrandColors>();
+
+    // Backstop each frame: mark visible incoming as read + clear unseen
     WidgetsBinding.instance.addPostFrameCallback((_) => _sendReadForVisible());
 
-    final peerName = chat.peerUserId ?? chat.groupId ?? 'Chat';
-    final avatarLabel = _initialsFromId(chat.peerUserId ?? '🙂');
+    // Resolve friendly name
+    final resolver = DisplayNameResolver.of(context);
+    final peerIdOrGroup = chat.peerUserId ?? chat.groupId ?? 'Chat';
+    final peerName = (chat.peerUserId != null)
+        ? resolver.forUserId(chat.peerUserId!, fallback: peerIdOrGroup)
+        : (_groupTitle ?? peerIdOrGroup);
+
     final unread = _unreadCount(messages);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    final showPresenceDot = chat.peerUserId != null; // hide for groups
 
     return Scaffold(
       appBar: AppBar(
         title: Row(
           children: [
-            Icon(Icons.circle, size: 10, color: _peerOnline ? Colors.green : Colors.grey),
-            const SizedBox(width: 6),
-            Text(peerName, overflow: TextOverflow.ellipsis),
+            if (showPresenceDot)
+              Icon(
+                Icons.circle,
+                size: 10,
+                color: _peerOnline
+                    ? (brand?.success ?? c.secondary)
+                    : c.outlineVariant,
+              ),
+            if (showPresenceDot) const SizedBox(width: 6),
+            Expanded(child: Text(peerName, overflow: TextOverflow.ellipsis)),
             const SizedBox(width: 8),
-            if (chat.typingPeer) const Text('• typing...', style: TextStyle(fontSize: 12)),
+            if (chat.typingPeer)
+              Text(
+                '• typing...',
+                style: Theme.of(
+                  context,
+                ).textTheme.labelMedium?.copyWith(color: c.onSurfaceVariant),
+              ),
           ],
         ),
       ),
-
       floatingActionButton: _showJumpDown
           ? SizedBox(
               width: 56,
@@ -407,17 +614,34 @@ class _ChatScreenState extends State<ChatScreen> {
                       right: -2,
                       top: -2,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.redAccent,
-                          borderRadius: BorderRadius.circular(10),
-                          boxShadow: const [BoxShadow(blurRadius: 2, color: Colors.black26)],
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
                         ),
-                        constraints: const BoxConstraints(minWidth: 22, minHeight: 18),
+                        decoration: BoxDecoration(
+                          color: c.primary,
+                          borderRadius: BorderRadius.circular(10),
+                          boxShadow: [
+                            BoxShadow(
+                              blurRadius: 2,
+                              color: Theme.of(
+                                context,
+                              ).shadowColor.withValues(alpha: 0.15),
+                            ),
+                          ],
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 22,
+                          minHeight: 18,
+                        ),
                         child: Text(
                           unread > 99 ? '99+' : '$unread',
                           textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: c.onPrimary,
+                                fontWeight: FontWeight.bold,
+                              ),
                         ),
                       ),
                     ),
@@ -425,10 +649,8 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             )
           : null,
-
       body: Column(
         children: [
-          // Pull-to-refresh + sticky headers
           Expanded(
             child: ListView.builder(
               controller: _scroll,
@@ -437,40 +659,45 @@ class _ChatScreenState extends State<ChatScreen> {
               itemBuilder: (context, index) {
                 final msg = messages[index];
 
-                // day header logic
                 bool showHeader = false;
                 String? headerLabel;
                 if (index == 0) {
                   showHeader = true;
                 } else {
                   final prev = messages[index - 1];
-                  final a = DateTime(msg.createdAt.year, msg.createdAt.month, msg.createdAt.day);
-                  final b = DateTime(prev.createdAt.year, prev.createdAt.month, prev.createdAt.day);
+                  final a = DateTime(
+                    msg.createdAt.year,
+                    msg.createdAt.month,
+                    msg.createdAt.day,
+                  );
+                  final b = DateTime(
+                    prev.createdAt.year,
+                    prev.createdAt.month,
+                    prev.createdAt.day,
+                  );
                   if (a.difference(b).inDays != 0) showHeader = true;
                 }
-                if (showHeader) {
-                  headerLabel = _labelForDate(msg.createdAt);
-                }
+                if (showHeader) headerLabel = _labelForDate(msg.createdAt);
 
                 final showNew = _newMarkerId != null && _newMarkerId == msg.id;
+
+                final incomingLabel = !msg.isMine
+                    ? (chat.peerUserId != null
+                          ? resolver.initialsFor(chat.peerUserId!)
+                          : _initialsFromId(msg.senderId))
+                    : null;
 
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     if (showHeader) DateDivider(headerLabel!),
                     if (showNew) const NewMessagesDivider(),
-                    MessageBubble(
-                      message: msg,
-                      avatarLabel: msg.isMine ? null : _initialsFromId(msg.senderId),
-                    ),
+                    MessageBubble(message: msg, avatarLabel: incomingLabel),
                   ],
                 );
               },
             ),
           ),
-
-
-          // history loader indicator
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 150),
             child: context.watch<ChatState>().isFetchingHistory
@@ -485,25 +712,29 @@ class _ChatScreenState extends State<ChatScreen> {
                   )
                 : const SizedBox.shrink(key: ValueKey('idle_history')),
           ),
-
-          // typing row
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 150),
             child: context.watch<ChatState>().typingPeer
                 ? Padding(
                     key: const ValueKey('typing'),
-                    padding: const EdgeInsets.only(left: 16, right: 16, bottom: 6),
+                    padding: const EdgeInsets.only(
+                      left: 16,
+                      right: 16,
+                      bottom: 6,
+                    ),
                     child: Row(
-                      children: const [
-                        SizedBox(width: 4),
-                        Text('typing…', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      children: [
+                        const SizedBox(width: 4),
+                        Text(
+                          'typing…',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: c.onSurfaceVariant),
+                        ),
                       ],
                     ),
                   )
                 : const SizedBox.shrink(key: ValueKey('not_typing')),
           ),
-
-          // sticky input bar
           AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOutCubic,
@@ -515,30 +746,49 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             decoration: BoxDecoration(
               color: Theme.of(context).scaffoldBackgroundColor,
-              boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, -2))],
+              boxShadow: [
+                BoxShadow(
+                  color: Theme.of(context).shadowColor.withValues(alpha: 0.08),
+                  blurRadius: 10,
+                  offset: const Offset(0, -2),
+                ),
+              ],
             ),
             child: SafeArea(
               top: false,
               child: Row(
                 children: [
-                  // paperclip
                   IconButton(
                     icon: const Icon(Icons.attach_file),
                     onPressed: _pickAndSendAttachment,
                     tooltip: 'Attach file/image',
+                    color: c.onSurfaceVariant,
                   ),
                   Expanded(
                     child: TextField(
                       focusNode: _inputFocus,
                       controller: _controller,
                       onChanged: _maybeEmitTyping,
-                      decoration: const InputDecoration(hintText: 'Type a message...'),
+                      minLines: 1,
+                      maxLines: 5,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => _sendMessage(),
+                      decoration: const InputDecoration(
+                        hintText: 'Type a message...',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 4),
-                  IconButton(
+                  IconButton.filled(
                     icon: const Icon(Icons.send),
                     onPressed: _canSend ? _sendMessage : null,
+                    tooltip: 'Send',
                   ),
                 ],
               ),

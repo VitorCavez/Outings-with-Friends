@@ -1,15 +1,12 @@
 // backend/src/routes/inviteRoutes.js
 const express = require('express');
 const router = express.Router();
+const { requireAuth } = require('../middleware/auth');
+const ctrl = require('../controllers/inviteController');
 
-router.post('/', async (req, res) => {
-  try {
-    const { toUserId, groupId } = req.body || {};
-    res.status(201).json({ ok: true, toUserId, groupId });
-  } catch (err) {
-    console.error('inviteRoutes error:', err);
-    res.status(500).json({ error: 'Failed to create invite' });
-  }
-});
+router.post('/', requireAuth, ctrl.createInvite);
+router.post('/:id/accept', requireAuth, ctrl.acceptInvite);
+router.post('/:id/decline', requireAuth, ctrl.declineInvite);
+router.get('/', requireAuth, ctrl.listInvites);
 
 module.exports = router;

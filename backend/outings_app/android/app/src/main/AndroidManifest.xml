@@ -1,11 +1,26 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Network permissions -->
+    <!-- Network + notifications -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-
-    <!-- Notifications (optional for Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Location (foreground) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Images (for image_picker) -->
+    <!-- Android 13+ (API 33): granular photo/media permission -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- Android 12 and below -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!-- Optional: enable if you use ImageSource.camera -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Declare capabilities without requiring them (so non-GPS devices can still install) -->
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 
     <application
         android:name="${applicationName}"
@@ -19,28 +34,58 @@
             android:launchMode="singleTop"
             android:taskAffinity=""
             android:theme="@style/LaunchTheme"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode">
 
-            <!-- Theme shown while Flutter initializes -->
+            <!-- Splash window background while Flutter initializes -->
             <meta-data
                 android:name="io.flutter.embedding.android.NormalTheme"
                 android:resource="@style/NormalTheme" />
 
+            <!-- Main launcher -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- ✅ Custom-scheme deep links: e.g. outings://outings/123 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="outings"
+                    android:host="outings" />
+            </intent-filter>
+
+            <!-- ✅ Android App Links (https) to open in app -->
+            <!-- NOTE: autoVerify will succeed once you host a valid assetlinks.json on the domain -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <!-- Web App Link(s) that should open the app -->
+                <data
+                    android:scheme="https"
+                    android:host="outings-with-friends.web.app"
+                    android:pathPrefix="/plan/outings" />
+                <!-- Optional: Firebaseapp domain if you’ll share it too -->
+                <data
+                    android:scheme="https"
+                    android:host="outings-with-friends.firebaseapp.com"
+                    android:pathPrefix="/plan/outings" />
+            </intent-filter>
         </activity>
 
-        <!-- Flutter plugin registrar -->
+        <!-- Required by Flutter tooling -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
     </application>
 
-    <!-- Package visibility for Process Text -->
+    <!-- Package visibility (used by Flutter text processing plugin) -->
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />

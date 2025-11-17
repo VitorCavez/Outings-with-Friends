@@ -9,14 +9,18 @@ class Message {
   final bool isRead;
   final bool isMine;
 
-  /// Attachments
   /// 'text' | 'image' | 'file'
   final String messageType;
+
   /// Remote URL to the uploaded file/image
   final String? mediaUrl;
+
   /// Optional metadata for files
   final String? fileName;
   final int? fileSize; // bytes
+
+  /// When the message was marked read (server time), if ever
+  final DateTime? readAt;
 
   Message({
     required this.id,
@@ -31,13 +35,40 @@ class Message {
     this.mediaUrl,
     this.fileName,
     this.fileSize,
+    this.readAt,
   });
 
-  /// Convenience flags
   bool get isImage => messageType == 'image';
-  bool get isFile  => messageType == 'file';
+  bool get isFile => messageType == 'file';
 
-  /// Basic image extension detection (used if backend doesn't provide `messageType`)
+  static DateTime _toLocal(DateTime dt) => dt.isUtc ? dt.toLocal() : dt;
+
+  static DateTime _parseCreated(dynamic created) {
+    if (created is String) {
+      final parsed = DateTime.tryParse(created);
+      if (parsed != null) return _toLocal(parsed);
+      return DateTime.now();
+    }
+    if (created is int) {
+      final ms = created > 1000000000000 ? created : created * 1000;
+      return DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true).toLocal();
+    }
+    return DateTime.now();
+  }
+
+  static DateTime? _parseOptionalDate(dynamic v) {
+    if (v == null) return null;
+    if (v is String) {
+      final parsed = DateTime.tryParse(v);
+      return parsed == null ? null : _toLocal(parsed);
+    }
+    if (v is int) {
+      final ms = v > 1000000000000 ? v : v * 1000;
+      return DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true).toLocal();
+    }
+    return null;
+  }
+
   static bool _looksLikeImageUrl(String url) {
     final u = url.toLowerCase();
     return u.endsWith('.png') ||
@@ -45,29 +76,20 @@ class Message {
         u.endsWith('.jpeg') ||
         u.endsWith('.gif') ||
         u.endsWith('.webp') ||
-        u.contains('image/upload'); // common on Cloudinary, etc.
+        u.endsWith('.bmp') ||
+        u.contains('image/upload');
   }
 
   factory Message.fromMap(Map<String, dynamic> j, String currentUserId) {
-    // Robust createdAt parsing
-    final created = j['createdAt'];
-    DateTime ts;
-    if (created is String) {
-      ts = DateTime.tryParse(created) ?? DateTime.now();
-    } else if (created is int) {
-      ts = DateTime.fromMillisecondsSinceEpoch(created);
-    } else {
-      ts = DateTime.now();
-    }
-
-    final idVal = (j['id'] ?? j['messageId'] ?? DateTime.now().millisecondsSinceEpoch).toString();
+    final idVal =
+        (j['id'] ?? j['messageId'] ?? DateTime.now().millisecondsSinceEpoch)
+            .toString();
     final sender = (j['senderId'] ?? '').toString();
 
-    // Attachment fields (all optional)
-    final String? rawMediaUrl = (j['mediaUrl'] ?? j['attachmentUrl'] ?? j['url'])?.toString();
+    final String? rawMediaUrl =
+        (j['mediaUrl'] ?? j['attachmentUrl'] ?? j['url'])?.toString();
     final String? rawType = (j['messageType'] ?? j['type'])?.toString();
 
-    // Infer type if not provided
     String computedType;
     if (rawType != null && rawType.isNotEmpty) {
       computedType = rawType;
@@ -83,13 +105,14 @@ class Message {
       senderId: sender,
       recipientId: j['recipientId'] as String?,
       groupId: j['groupId'] as String?,
-      createdAt: ts,
+      createdAt: _parseCreated(j['createdAt']),
       isRead: (j['isRead'] ?? false) as bool,
       isMine: sender == currentUserId,
       messageType: computedType,
       mediaUrl: rawMediaUrl,
       fileName: (j['fileName'] ?? j['name'])?.toString(),
       fileSize: (j['fileSize'] is int) ? j['fileSize'] as int : null,
+      readAt: _parseOptionalDate(j['readAt']),
     );
   }
 
@@ -106,6 +129,7 @@ class Message {
       'mediaUrl': mediaUrl,
       'fileName': fileName,
       'fileSize': fileSize,
+      'readAt': readAt?.toIso8601String(),
     };
   }
 
@@ -122,6 +146,7 @@ class Message {
     String? mediaUrl,
     String? fileName,
     int? fileSize,
+    DateTime? readAt,
   }) {
     return Message(
       id: id ?? this.id,
@@ -136,6 +161,36 @@ class Message {
       mediaUrl: mediaUrl ?? this.mediaUrl,
       fileName: fileName ?? this.fileName,
       fileSize: fileSize ?? this.fileSize,
+      readAt: readAt ?? this.readAt,
+    );
+  }
+
+  Message merge(Message other) {
+    final mergedText = other.text.trim().isNotEmpty ? other.text : text;
+    final mergedCreated = other.createdAt.isAfter(createdAt)
+        ? other.createdAt
+        : createdAt;
+
+    String mergedType = messageType;
+    String? mergedMedia = mediaUrl;
+    if (other.messageType != 'text' || messageType == 'text') {
+      mergedType = other.messageType;
+      mergedMedia = other.mediaUrl ?? mergedMedia;
+    }
+
+    return copyWith(
+      text: mergedText,
+      senderId: other.senderId.isNotEmpty ? other.senderId : senderId,
+      recipientId: other.recipientId ?? recipientId,
+      groupId: other.groupId ?? groupId,
+      createdAt: mergedCreated,
+      isRead: isRead || other.isRead,
+      isMine: other.isMine,
+      messageType: mergedType,
+      mediaUrl: mergedMedia,
+      fileName: other.fileName ?? fileName,
+      fileSize: other.fileSize ?? fileSize,
+      readAt: other.readAt ?? readAt,
     );
   }
 }

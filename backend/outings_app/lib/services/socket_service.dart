@@ -1,9 +1,11 @@
 // lib/services/socket_service.dart
 import 'dart:async';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:socket_io_client/socket_io_client.dart' as IO;
-// NOTE: Don't import 'dart:io' directly on web. We'll gate it with kIsWeb.
+// If you later target web, consider conditional imports for dart:io.
 import 'dart:io' show Platform;
+
+import '../config/app_config.dart';
 
 class SocketService {
   static final SocketService _instance = SocketService._internal();
@@ -12,45 +14,62 @@ class SocketService {
 
   IO.Socket? _socket;
 
-  // ---- NEW: connection status stream (true=connected, false=disconnected)
-  final StreamController<bool> _conn$ = StreamController<bool>.broadcast();
+  final _conn$ = StreamController<bool>.broadcast();
   Stream<bool> get connection$ => _conn$.stream;
 
-  // ---- NEW: outbox queue for unsent events
   final List<_Queued> _outbox = <_Queued>[];
 
-  String _defaultBaseUrl() {
-    if (kIsWeb) return 'http://localhost:4000';
-    if (Platform.isAndroid) return 'http://10.0.2.2:4000';
-    if (Platform.isIOS) return 'http://127.0.0.1:4000';
-    return 'http://localhost:4000';
+  String? _overrideBaseUrl;
+
+  String _resolveBaseUrl() {
+    if (_overrideBaseUrl != null && _overrideBaseUrl!.isNotEmpty) {
+      return _overrideBaseUrl!;
+    }
+    final cfg = AppConfig.socketBaseUrl.trim();
+    if (cfg.isNotEmpty) return cfg;
+
+    // Dev fallbacks
+    if (kIsWeb) return 'http://127.0.0.1:3000';
+    if (Platform.isAndroid) return 'http://10.0.2.2:3000';
+    return 'http://127.0.0.1:3000';
+  }
+
+  void setBaseUrl(String baseUrl) {
+    _overrideBaseUrl = baseUrl.trim();
+    if (_socket != null) {
+      try {
+        _socket!.dispose();
+      } catch (_) {}
+      _socket = null;
+    }
   }
 
   void initSocket({
     String? baseUrl,
     String path = '/socket.io',
     bool autoConnect = true,
-    String? userId, // optional: to support presence/targeted rooms
+    String? userId,
   }) {
-    final url = baseUrl ?? _defaultBaseUrl();
-
+    final url = (baseUrl ?? _resolveBaseUrl()).replaceAll(RegExp(r'/+$'), '');
     if (_socket != null) {
       if (autoConnect && _socket!.disconnected) _socket!.connect();
       return;
     }
 
-    // We’ll pass userId via `auth` so backend can put the socket in a user room.
-    final builder = IO.OptionBuilder()
-        .setTransports(['websocket'])
-        .setPath(path)
-        .setAuth(userId != null ? {'userId': userId} : {})
-        // v2 builder has no setAutoConnect; use disableAutoConnect when needed.
-        ;
-
-    final opts = (autoConnect) ? builder.build() : builder.disableAutoConnect().build();
+    // Build options as a plain map to be compatible with all versions
+    final Map<String, dynamic> opts = {
+      'transports': ['websocket'],
+      'path': path,
+      'reconnection': true,
+      'reconnectionAttempts': 15,
+      'reconnectionDelay': 800, // ms
+      'timeout': 10000, // connect timeout ms
+      'autoConnect': autoConnect,
+      'auth': userId != null ? {'userId': userId} : <String, dynamic>{},
+    };
 
     _socket = IO.io(url, opts);
-    _attachListeners();
+    _attachListeners(url);
 
     if (autoConnect) _socket!.connect();
   }
@@ -60,12 +79,10 @@ class SocketService {
   IO.Socket? get socket => _socket;
   bool get isConnected => _socket?.connected == true;
 
-  // Allow consumers to subscribe to any event without exposing _socket
   void on(String event, void Function(dynamic data) handler) {
     _socket?.on(event, handler);
   }
 
-  // Allow removing listeners
   void off(String event, [void Function(dynamic data)? handler]) {
     if (handler != null) {
       _socket?.off(event, handler);
@@ -74,7 +91,7 @@ class SocketService {
     }
   }
 
-  void _attachListeners() {
+  void _attachListeners(String urlForLogs) {
     if (_socket == null) return;
 
     _socket!
@@ -85,19 +102,27 @@ class SocketService {
       ..off('reconnect')
       ..off('reconnect_attempt')
       ..onConnect((_) {
+        debugPrint('🔌 Socket connected → $urlForLogs');
         _conn$.add(true);
         _flushOutbox();
       })
       ..onDisconnect((_) {
+        debugPrint('🔌 Socket disconnected');
         _conn$.add(false);
       })
       ..onError((err) {
+        debugPrint('❌ socket error: $err');
         _conn$.add(false);
       })
-      ..on('connect_error', (_) {
+      ..on('connect_error', (err) {
+        debugPrint('❌ connect_error → $err (url=$urlForLogs)');
         _conn$.add(false);
       })
-      ..on('reconnect', (_) {
+      ..on('reconnect_attempt', (n) {
+        debugPrint('🔁 reconnect attempt #$n …');
+      })
+      ..on('reconnect', (n) {
+        debugPrint('✅ reconnected after $n attempt(s)');
         _conn$.add(true);
         _flushOutbox();
       });
@@ -111,7 +136,6 @@ class SocketService {
     }
   }
 
-  // ---- NEW: central emit that queues if offline
   void _safeEmit(String event, Map<String, dynamic> payload) {
     _ensureReady();
     if (isConnected) {
@@ -121,7 +145,6 @@ class SocketService {
     }
   }
 
-  // ---- NEW: flush queue on reconnect
   void _flushOutbox() {
     if (!isConnected || _outbox.isEmpty) return;
     for (final q in _outbox) {
@@ -136,7 +159,7 @@ class SocketService {
     required String senderId,
     String? groupId,
     String? recipientId,
-    String? messageType, // 'text' | 'image' ...
+    String? messageType,
     String? mediaUrl,
     String? fileName,
     int? fileSize,
@@ -153,7 +176,11 @@ class SocketService {
     });
   }
 
-  void sendTyping({required bool isTyping, String? recipientId, String? groupId}) {
+  void sendTyping({
+    required bool isTyping,
+    String? recipientId,
+    String? groupId,
+  }) {
     _safeEmit('typing', {
       'isTyping': isTyping,
       'recipientId': recipientId,
@@ -163,6 +190,30 @@ class SocketService {
 
   void sendRead(String messageId) {
     _safeEmit('read_message', {'messageId': messageId});
+  }
+
+  void subscribePresence(String peerUserId) {
+    /* no-op for now */
+  }
+  void unsubscribePresence(String peerUserId) {
+    /* no-op */
+  }
+  void queryPresence(String peerUserId) {
+    _safeEmit('presence_query', {'peerUserId': peerUserId});
+  }
+
+  void joinGroup(String groupId) {
+    if (groupId.trim().isEmpty) return;
+    _safeEmit('join_group', {'groupId': groupId});
+  }
+
+  void leaveGroup(String groupId) {
+    if (groupId.trim().isEmpty) return;
+    _safeEmit('leave_group', {'groupId': groupId});
+  }
+
+  void refreshGroups() {
+    _safeEmit('refresh_groups', {});
   }
 
   void sendTestMessage() {
@@ -175,7 +226,9 @@ class SocketService {
 
   void dispose() {
     _conn$.close();
-    _socket?.dispose();
+    try {
+      _socket?.dispose();
+    } catch (_) {}
     _socket = null;
   }
 }

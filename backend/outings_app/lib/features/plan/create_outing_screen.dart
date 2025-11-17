@@ -2,11 +2,16 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
 
-/// IMPORTANT: Set your backend URL here.
-/// - On Android emulator use http://10.0.2.2:4000
-/// - On iOS simulator or real device on same Wi-Fi, use your machine's IP, e.g., http://192.168.1.23:4000
-const String kBaseUrl = 'http://10.0.2.2:4000';
+// Config + Auth
+import '../../config/app_config.dart';
+import '../auth/auth_provider.dart';
+
+// Autocomplete
+import '../../widgets/place_autocomplete_field.dart';
+import '../../services/places_service.dart';
 
 class CreateOutingScreen extends StatefulWidget {
   const CreateOutingScreen({super.key});
@@ -21,18 +26,19 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
   // Basic fields
   final _titleCtrl = TextEditingController();
   final _descriptionCtrl = TextEditingController();
-  final _createdByIdCtrl = TextEditingController();
-  final _locationNameCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
-  final _latCtrl = TextEditingController(text: '53.3498');   // Dublin default
-  final _lngCtrl = TextEditingController(text: '-6.2603');
+
+  // Filled by the place autocomplete
+  String? _locationName;
+  double? _lat;
+  double? _lng;
 
   // Piggy Bank
   bool _piggyBankEnabled = true;
   final _piggyBankTargetEuroCtrl = TextEditingController(text: '50.00');
 
   // Outing Type
-  final List<String> _types = [
+  final List<String> _types = const [
     'food_and_drink',
     'outdoor',
     'concert',
@@ -50,18 +56,12 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
   void dispose() {
     _titleCtrl.dispose();
     _descriptionCtrl.dispose();
-    _createdByIdCtrl.dispose();
-    _locationNameCtrl.dispose();
     _addressCtrl.dispose();
-    _latCtrl.dispose();
-    _lngCtrl.dispose();
     _piggyBankTargetEuroCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _pickDateTime({
-    required bool isStart,
-  }) async {
+  Future<void> _pickDateTime({required bool isStart}) async {
     final initial = isStart ? _start : _end;
     final date = await showDatePicker(
       context: context,
@@ -77,15 +77,21 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
     );
     if (time == null) return;
 
-    final picked = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+    final picked = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      time.hour,
+      time.minute,
+    );
     setState(() {
       if (isStart) {
         _start = picked;
-        if (_end.isBefore(_start)) {
-          _end = _start.add(const Duration(hours: 2));
-        }
+        if (_end.isBefore(_start)) _end = _start.add(const Duration(hours: 2));
       } else {
-        _end = picked.isAfter(_start) ? picked : _start.add(const Duration(hours: 2));
+        _end = picked.isAfter(_start)
+            ? picked
+            : _start.add(const Duration(hours: 2));
       }
     });
   }
@@ -95,46 +101,60 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
     final value = double.tryParse(sanitized);
     if (value == null) return null;
     return (value * 100).round();
-    // Note: server stores cents as int; this avoids float rounding issues.
+  }
+
+  String _readJwt(BuildContext context) {
+    try {
+      final auth = context.read<AuthProvider>();
+      final dyn = auth as dynamic;
+      return (dyn.authToken ?? dyn.token) as String? ?? '';
+    } catch (_) {
+      return '';
+    }
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final createdById = _createdByIdCtrl.text.trim();
-    final title = _titleCtrl.text.trim();
-    final description = _descriptionCtrl.text.trim().isEmpty ? null : _descriptionCtrl.text.trim();
-    final locationName = _locationNameCtrl.text.trim();
-    final address = _addressCtrl.text.trim().isEmpty ? null : _addressCtrl.text.trim();
-    final lat = double.tryParse(_latCtrl.text.trim());
-    final lng = double.tryParse(_lngCtrl.text.trim());
-
-    if (lat == null || lng == null) {
+    if (_locationName == null || _lat == null || _lng == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Latitude and longitude must be numbers.')),
+        const SnackBar(
+          content: Text(
+            'Please select a location from the list or add a custom place.',
+          ),
+        ),
       );
       return;
     }
+
+    final title = _titleCtrl.text.trim();
+    final description = _descriptionCtrl.text.trim().isEmpty
+        ? null
+        : _descriptionCtrl.text.trim();
+    final address = _addressCtrl.text.trim().isEmpty
+        ? null
+        : _addressCtrl.text.trim();
 
     int? piggyBankTargetCents;
     if (_piggyBankEnabled) {
       piggyBankTargetCents = _eurosToCents(_piggyBankTargetEuroCtrl.text);
       if (piggyBankTargetCents == null || piggyBankTargetCents <= 0) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Enter a valid Piggy Bank target (in euros).')),
+          const SnackBar(
+            content: Text('Enter a valid Piggy Bank target (in euros).'),
+          ),
         );
         return;
       }
     }
 
-    final body = {
+    final body = <String, dynamic>{
       "title": title,
       "description": description,
       "outingType": _outingType,
-      "createdById": createdById,
-      "locationName": locationName,
-      "latitude": lat,
-      "longitude": lng,
+      "locationName": _locationName,
+      "latitude": _lat,
+      "longitude": _lng,
       "address": address,
       "dateTimeStart": _start.toUtc().toIso8601String(),
       "dateTimeEnd": _end.toUtc().toIso8601String(),
@@ -142,34 +162,65 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
       "budgetMax": null,
       "piggyBankEnabled": _piggyBankEnabled,
       "piggyBankTargetCents": _piggyBankEnabled ? piggyBankTargetCents : null,
-      "checklist": []
+      "checklist": [],
     };
+
+    final token = _readJwt(context);
+    if (token.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You need to be logged in to create an outing.'),
+        ),
+      );
+      return;
+    }
 
     try {
       final resp = await http.post(
-        Uri.parse('$kBaseUrl/api/outings'),
-        headers: { 'Content-Type': 'application/json' },
+        Uri.parse('${AppConfig.apiBaseUrl}/api/outings'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
         body: jsonEncode(body),
       );
 
       if (resp.statusCode == 201) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Outing created!')),
-        );
-        if (mounted) Navigator.of(context).pop(true);
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Outing created!')));
+        Navigator.of(context).pop(true);
+      } else if (resp.statusCode == 401) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Please log in again.')));
       } else {
-        final msg = 'Create failed (${resp.statusCode}): ${resp.body}';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Create failed (${resp.statusCode}): ${resp.body}'),
+          ),
+        );
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Network error: $e')),
-      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Network error: $e')));
     }
   }
 
+  String _readToken() => _readJwt(context);
+  String _formatDT(DateTime dt) =>
+      DateFormat('EEE, d MMM yyyy • HH:mm').format(dt.toLocal());
+
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Create Outing')),
       body: Form(
@@ -177,46 +228,48 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            // Created By (temporary until auth is wired)
-            TextFormField(
-              controller: _createdByIdCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Created By (User ID)',
-                hintText: 'Paste a valid User.id',
-                prefixIcon: Icon(Icons.person),
-              ),
-              validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-            ),
-            const SizedBox(height: 12),
-
             TextFormField(
               controller: _titleCtrl,
               decoration: const InputDecoration(
                 labelText: 'Title',
                 prefixIcon: Icon(Icons.title),
               ),
-              validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Required' : null,
             ),
             const SizedBox(height: 12),
 
+            // Outing type
             DropdownButtonFormField<String>(
-              value: _outingType,
-              items: _types.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+              initialValue:
+                  _outingType, // <- use initialValue (value is deprecated here)
+              items: _types
+                  .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                  .toList(),
               onChanged: (v) => setState(() => _outingType = v ?? _outingType),
               decoration: const InputDecoration(
                 labelText: 'Outing type',
                 prefixIcon: Icon(Icons.category),
               ),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+              dropdownColor: Theme.of(context).colorScheme.surface,
             ),
             const SizedBox(height: 12),
 
-            TextFormField(
-              controller: _locationNameCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Location name',
-                prefixIcon: Icon(Icons.place),
-              ),
-              validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+            // Location (autocomplete)
+            PlaceAutocompleteField(
+              labelText: 'Location name',
+              token: _readToken(),
+              onSelected: (PlaceSuggestion p) {
+                setState(() {
+                  _locationName = p.name;
+                  _addressCtrl.text = p.address ?? _addressCtrl.text;
+                  _lat = p.latitude;
+                  _lng = p.longitude;
+                });
+              },
             ),
             const SizedBox(height: 12),
 
@@ -227,31 +280,8 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
                 prefixIcon: Icon(Icons.map),
               ),
             ),
-            const SizedBox(height: 12),
 
-            Row(
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _latCtrl,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                    decoration: const InputDecoration(labelText: 'Latitude'),
-                    validator: (v) => (double.tryParse(v ?? '') == null) ? 'Number' : null,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextFormField(
-                    controller: _lngCtrl,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                    decoration: const InputDecoration(labelText: 'Longitude'),
-                    validator: (v) => (double.tryParse(v ?? '') == null) ? 'Number' : null,
-                  ),
-                ),
-              ],
-            ),
             const SizedBox(height: 12),
-
             TextFormField(
               controller: _descriptionCtrl,
               maxLines: 3,
@@ -263,22 +293,40 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
             const SizedBox(height: 12),
 
             // Dates
-            ListTile(
-              leading: const Icon(Icons.schedule),
-              title: const Text('Start'),
-              subtitle: Text(_start.toLocal().toString()),
-              trailing: TextButton(
-                onPressed: () => _pickDateTime(isStart: true),
-                child: const Text('Change'),
+            Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: ListTile(
+                leading: Icon(Icons.schedule, color: cs.onSurfaceVariant),
+                title: const Text('Start'),
+                subtitle: Text(
+                  _formatDT(_start),
+                  style: TextStyle(color: cs.onSurfaceVariant),
+                ),
+                trailing: TextButton(
+                  onPressed: () => _pickDateTime(isStart: true),
+                  child: const Text('Change'),
+                ),
               ),
             ),
-            ListTile(
-              leading: const Icon(Icons.schedule),
-              title: const Text('End'),
-              subtitle: Text(_end.toLocal().toString()),
-              trailing: TextButton(
-                onPressed: () => _pickDateTime(isStart: false),
-                child: const Text('Change'),
+            Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: ListTile(
+                leading: Icon(Icons.schedule, color: cs.onSurfaceVariant),
+                title: const Text('End'),
+                subtitle: Text(
+                  _formatDT(_end),
+                  style: TextStyle(color: cs.onSurfaceVariant),
+                ),
+                trailing: TextButton(
+                  onPressed: () => _pickDateTime(isStart: false),
+                  child: const Text('Change'),
+                ),
               ),
             ),
             const Divider(height: 24),
@@ -288,13 +336,18 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
               value: _piggyBankEnabled,
               onChanged: (v) => setState(() => _piggyBankEnabled = v),
               title: const Text('Enable Piggy Bank'),
-              subtitle: const Text('Friends can contribute to a shared target'),
+              subtitle: Text(
+                'Friends can contribute to a shared target',
+                style: TextStyle(color: cs.onSurfaceVariant),
+              ),
             ),
             if (_piggyBankEnabled) ...[
               const SizedBox(height: 8),
               TextFormField(
                 controller: _piggyBankTargetEuroCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
                 decoration: const InputDecoration(
                   labelText: 'Piggy Bank Target (€)',
                   prefixIcon: Icon(Icons.savings),
@@ -302,7 +355,8 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
                 validator: (v) {
                   if (!_piggyBankEnabled) return null;
                   final cents = _eurosToCents(v ?? '');
-                  if (cents == null || cents <= 0) return 'Enter a valid amount';
+                  if (cents == null || cents <= 0)
+                    return 'Enter a valid amount';
                   return null;
                 },
               ),

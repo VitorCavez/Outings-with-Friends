@@ -9,7 +9,8 @@ class FavoritesService {
 
   /// POST /api/outings/:outingId/favorite
   Future<FavoriteItem> favorite(String outingId) async {
-    final r = await api.postJson('/api/outings/$outingId/favorite', {});
+    // No body needed for simple toggle
+    final r = await api.post('/api/outings/$outingId/favorite');
     if (r.statusCode != 201) {
       throw Exception('favorite failed (${r.statusCode}) ${r.body}');
     }
@@ -19,24 +20,21 @@ class FavoritesService {
 
   /// DELETE /api/outings/:outingId/favorite
   Future<void> unfavorite(String outingId) async {
-    final req = http.Request('DELETE', Uri.parse('${api.baseUrl}/api/outings/$outingId/favorite'));
-    if (api.authToken != null && api.authToken!.isNotEmpty) {
-      req.headers['Authorization'] = 'Bearer ${api.authToken}';
-    }
-    final streamed = await req.send();
-    final code = streamed.statusCode;
-    if (code != 200) {
-      final body = await streamed.stream.bytesToString();
-      throw Exception('unfavorite failed ($code) $body');
+    final r = await api.delete('/api/outings/$outingId/favorite');
+    if (r.statusCode != 200) {
+      throw Exception('unfavorite failed (${r.statusCode}) ${r.body}');
     }
   }
 
   /// GET /api/users/me/favorites?limit=&offset=
-  Future<FavoritesListResponse> listMine({int limit = 25, int offset = 0}) async {
-    final r = await api.get('/api/users/me/favorites', query: {
-      'limit': limit,
-      'offset': offset,
-    });
+  Future<FavoritesListResponse> listMine({
+    int limit = 25,
+    int offset = 0,
+  }) async {
+    final r = await api.get(
+      '/api/users/me/favorites',
+      query: {'limit': limit, 'offset': offset},
+    );
     if (r.statusCode != 200) {
       throw Exception('list favorites failed (${r.statusCode})');
     }

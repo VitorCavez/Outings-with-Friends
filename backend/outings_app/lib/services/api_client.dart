@@ -2,19 +2,31 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
+/// A tiny HTTP client that automatically attaches the latest JWT.
+/// - Pass either [authToken] (string) or a [tokenProvider] (preferred).
+/// - If both are provided, [tokenProvider] wins on each request.
 class ApiClient {
-  ApiClient({required this.baseUrl, this.authToken});
+  ApiClient({required this.baseUrl, this.authToken, this.tokenProvider});
+
   final String baseUrl;
   String? authToken;
+  final String Function()? tokenProvider;
+
+  String? _currentToken() {
+    try {
+      final t = tokenProvider?.call();
+      if (t != null && t.isNotEmpty) return t;
+    } catch (_) {}
+    return (authToken != null && authToken!.isNotEmpty) ? authToken : null;
+  }
 
   Map<String, String> _headers({Map<String, String>? extra}) {
     final h = <String, String>{
       'Content-Type': 'application/json',
       'Accept': 'application/json',
     };
-    if (authToken != null && authToken!.isNotEmpty) {
-      h['Authorization'] = 'Bearer $authToken';
-    }
+    final t = _currentToken();
+    if (t != null) h['Authorization'] = 'Bearer $t';
     if (extra != null) h.addAll(extra);
     return h;
   }
@@ -23,9 +35,9 @@ class ApiClient {
   Map<String, String> buildHeaders([Map<String, String>? extra]) =>
       _headers(extra: extra);
 
-  Uri _u(String path, [Map<String, dynamic>? q]) =>
-      Uri.parse('$baseUrl$path')
-          .replace(queryParameters: q?.map((k, v) => MapEntry(k, '$v')));
+  Uri _u(String path, [Map<String, dynamic>? q]) => Uri.parse(
+    '$baseUrl$path',
+  ).replace(queryParameters: q?.map((k, v) => MapEntry(k, '$v')));
 
   Future<http.Response> get(String path, {Map<String, dynamic>? query}) {
     return http.get(_u(path, query), headers: _headers());
@@ -35,25 +47,24 @@ class ApiClient {
     return http.post(_u(path), headers: _headers(), body: jsonEncode(body));
   }
 
+  /// POST without body (e.g., toggle endpoints)
+  Future<http.Response> post(String path) {
+    return http.post(_u(path), headers: _headers());
+  }
+
   Future<http.Response> putJson(String path, Map<String, dynamic> body) {
     return http.put(_u(path), headers: _headers(), body: jsonEncode(body));
   }
 
-  /// Handy if you later want to use ApiClient for PATCH too.
   Future<http.Response> patchJson(String path, Map<String, dynamic> body) {
     return http.patch(_u(path), headers: _headers(), body: jsonEncode(body));
   }
 
-  /// DELETE (no body)
   Future<http.Response> delete(String path) {
     return http.delete(_u(path), headers: _headers());
   }
 
   /// Multipart helper
-  ///
-  /// - `fields`: regular form fields
-  /// - `files`: map of fieldName -> ByteStream (MUST have a known length)
-  /// - `filenames`: map of fieldName -> filename (default 'upload.jpg')
   Future<http.StreamedResponse> postMultipart(
     String path, {
     required Map<String, String> fields,
@@ -62,19 +73,11 @@ class ApiClient {
     Map<String, String>? query,
   }) async {
     final req = http.MultipartRequest('POST', _u(path, query));
+    final t = _currentToken();
+    if (t != null) req.headers['Authorization'] = 'Bearer $t';
 
-    // Do NOT set Content-Type here; MultipartRequest will set the proper boundary.
-    // Add auth header if present.
-    if (authToken != null && authToken!.isNotEmpty) {
-      req.headers['Authorization'] = 'Bearer $authToken';
-    }
+    fields.forEach((k, v) => req.fields.putIfAbsent(k, () => v));
 
-    // Fields
-    fields.forEach((k, v) {
-      req.fields.putIfAbsent(k, () => v);
-    });
-
-    // Files
     for (final entry in files.entries) {
       final field = entry.key;
       final stream = entry.value;
@@ -86,32 +89,5 @@ class ApiClient {
     }
 
     return req.send();
-
-import '../config/app_config.dart';
-
-class ApiClient {
-  static String get _base => AppConfig.apiBaseUrl;
-
-  static Uri _uri(String path, [Map<String, String>? query]) {
-    // Ensure we don’t end up with a double slash
-    final normalized = path.startsWith('/') ? path : '/$path';
-    return Uri.parse('$_base$normalized').replace(queryParameters: query);
-  }
-
-  static Future<http.Response> postJson(
-    String path,
-    Map<String, Object?> body, {
-    Map<String, String>? headers,
-  }) {
-    final h = <String, String>{'Content-Type': 'application/json', ...?headers};
-    return http.post(_uri(path), headers: h, body: jsonEncode(body));
-  }
-
-  static Future<http.Response> getJson(
-    String path, {
-    Map<String, String>? headers,
-  }) {
-    final h = <String, String>{'Accept': 'application/json', ...?headers};
-    return http.get(_uri(path), headers: h);
   }
 }

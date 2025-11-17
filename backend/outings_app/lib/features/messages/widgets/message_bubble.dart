@@ -1,9 +1,12 @@
 // lib/features/messages/widgets/message_bubble.dart
 import 'package:flutter/material.dart';
-import 'package:characters/characters.dart'; // <-- needed for .characters
+import 'package:characters/characters.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:outings_app/models/message.dart';
+
+// Access the BrandColors extension from your theme
+import 'package:outings_app/theme/app_theme.dart';
 
 class MessageBubble extends StatelessWidget {
   const MessageBubble({
@@ -24,6 +27,7 @@ class MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isMine = message.isMine;
+    final c = Theme.of(context).colorScheme;
 
     final bubble = ConstrainedBox(
       constraints: BoxConstraints(
@@ -37,7 +41,7 @@ class MessageBubble extends StatelessWidget {
         ),
         margin: const EdgeInsets.symmetric(vertical: 4),
         decoration: BoxDecoration(
-          color: _bubbleColor(context, isMine),
+          color: _bubbleColor(c, isMine),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
@@ -52,7 +56,9 @@ class MessageBubble extends StatelessWidget {
                   _fmtTime(message.createdAt),
                   style: TextStyle(
                     fontSize: 10,
-                    color: isMine ? Colors.white70 : Colors.black54,
+                    color: isMine
+                        ? c.onPrimary.withValues(alpha: 0.72)
+                        : c.onSurfaceVariant,
                   ),
                 ),
                 if (isMine) ...[
@@ -61,8 +67,8 @@ class MessageBubble extends StatelessWidget {
                     message.isRead ? Icons.done_all : Icons.done,
                     size: 14,
                     color: message.isRead
-                        ? (isMine ? Colors.white : Colors.black54)
-                        : (isMine ? Colors.white70 : Colors.black45),
+                        ? c.onPrimary
+                        : c.onPrimary.withValues(alpha: 0.72),
                   ),
                 ],
               ],
@@ -99,6 +105,8 @@ class MessageBubble extends StatelessWidget {
   // ---- content variants -----------------------------------------------------
 
   Widget _buildContent(BuildContext context, bool isMine) {
+    final c = Theme.of(context).colorScheme;
+
     if (message.isImage && (message.mediaUrl?.isNotEmpty ?? false)) {
       return _ImageAttachment(url: message.mediaUrl!);
     }
@@ -114,17 +122,19 @@ class MessageBubble extends StatelessWidget {
     // Default: text bubble
     return Text(
       message.text,
-      style: TextStyle(color: isMine ? Colors.white : Colors.black),
+      style: TextStyle(color: isMine ? c.onPrimary : c.onSurface),
     );
   }
 
-  static Color _bubbleColor(BuildContext context, bool isMine) {
-    return isMine
-        ? Colors.blue
-        : (Theme.of(context).brightness == Brightness.dark
-            ? Colors.grey.shade800
-            : Colors.grey[300]!);
+  static Color _bubbleColor(ColorScheme c, bool isMine) {
+    // Mine = brand primary; Others = elevated surface per M3 containers
+    return isMine ? c.primary : c.surfaceContainerHighest;
   }
+
+  static Color _bubbleTextColor(ColorScheme c, bool isMine) =>
+      isMine ? c.onPrimary : c.onSurface;
+
+  static Color _metaTextColor(ColorScheme c) => c.onSurfaceVariant;
 
   static String _fmtTime(DateTime dt) {
     final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
@@ -142,6 +152,8 @@ class _ImageAttachment extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = Theme.of(context).colorScheme;
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(10),
       child: CachedNetworkImage(
@@ -153,6 +165,7 @@ class _ImageAttachment extends StatelessWidget {
         placeholder: (context, _) => Container(
           height: 180,
           width: 220,
+          color: c.surface, // avoids harsh white
           alignment: Alignment.center,
           child: const SizedBox(
             height: 22,
@@ -163,9 +176,9 @@ class _ImageAttachment extends StatelessWidget {
         errorWidget: (context, _, __) => Container(
           height: 180,
           width: 220,
-          color: Colors.black12,
+          color: c.surfaceVariant,
           alignment: Alignment.center,
-          child: const Icon(Icons.broken_image, size: 28),
+          child: Icon(Icons.broken_image, size: 28, color: c.onSurfaceVariant),
         ),
       ),
     );
@@ -187,24 +200,29 @@ class _FileAttachment extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final foreground = isMine ? Colors.white : Colors.black87;
+    final c = Theme.of(context).colorScheme;
+    final brand = Theme.of(context).extension<BrandColors>();
+
+    final fg = isMine ? c.onPrimary : c.onSurface;
+    final borderColor = isMine
+        ? c.onPrimary.withValues(alpha: 0.30)
+        : c.outlineVariant;
+    final bgColor = isMine ? c.onPrimary.withValues(alpha: 0.08) : c.surface;
 
     return InkWell(
       onTap: () => _openUrl(url),
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(10),
       child: Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: isMine ? Colors.white12 : Colors.white,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: isMine ? Colors.white38 : Colors.black12,
-          ),
+          color: bgColor,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: borderColor),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.attach_file, color: foreground),
+            Icon(Icons.attach_file, color: fg),
             const SizedBox(width: 8),
             Flexible(
               child: Text(
@@ -212,8 +230,11 @@ class _FileAttachment extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: foreground,
+                  color: fg,
                   decoration: TextDecoration.underline,
+                  decorationColor: isMine
+                      ? c.onPrimary
+                      : (brand?.info ?? c.primary),
                 ),
               ),
             ),
@@ -238,14 +259,16 @@ class _AvatarCircle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = Theme.of(context).colorScheme;
+
     return CircleAvatar(
       radius: 14,
       backgroundImage: imageUrl != null ? NetworkImage(imageUrl!) : null,
-      backgroundColor: imageUrl == null ? Colors.grey.shade400 : null,
+      backgroundColor: imageUrl == null ? c.secondaryContainer : null,
       child: imageUrl == null
           ? Text(
               (label ?? '🙂').characters.take(2).toString().toUpperCase(),
-              style: const TextStyle(fontSize: 11, color: Colors.white),
+              style: TextStyle(fontSize: 11, color: c.onSecondaryContainer),
             )
           : null,
     );
