@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+
 import '../../config/app_config.dart';
 
 class AuthResult {
@@ -13,28 +14,183 @@ class AuthResult {
 class AuthApi {
   final String _base = AppConfig.apiBaseUrl;
 
-  /// Calls POST /api/auth/login and returns the auth token + userId.
-  /// Tolerates a few response shapes:
-  ///  - { token, user: { id } }
-  ///  - { token, userId }
-  ///  - { jwt/accessToken, data: { user: { id } } }
+  /// POST /api/auth/login  (fallback: /auth/login)
+  /// Accepts { email, password }
+  /// Returns AuthResult(token, userId)
   Future<AuthResult> login({
     required String email,
     required String password,
     Duration timeout = const Duration(seconds: 90),
   }) async {
-    final uri = Uri.parse('$_base/api/auth/login');
+    final primary = Uri.parse('$_base/api/auth/login');
+    final fallback = Uri.parse('$_base/auth/login'); // legacy (no /api)
 
-    late http.Response res;
+    http.Response res = await _postJsonWithLogging(
+      uri: primary,
+      body: {'email': email, 'password': password},
+      timeout: timeout,
+      label: 'login(primary)',
+    );
+
+    if (res.statusCode == 404) {
+      res = await _postJsonWithLogging(
+        uri: fallback,
+        body: {'email': email, 'password': password},
+        timeout: timeout,
+        label: 'login(fallback)',
+      );
+    }
+
+    _throwOnNon2xx(res, defaultMsg: 'Login failed');
+
+    final body = _decodeBodyAsMap(res.body);
+    final token = _firstString(body, const ['token', 'jwt', 'accessToken']);
+    if (token == null || token.isEmpty) {
+      throw Exception('Malformed response from server (missing token).');
+    }
+
+    String? userId =
+        _firstString(body, const ['userId']) ??
+        _firstString(body['user'] as Map<String, dynamic>?, const ['id']) ??
+        _firstString(
+          (body['data'] as Map?)?['user'] as Map<String, dynamic>?,
+          const ['id'],
+        );
+
+    userId ??= await _fetchUserIdViaMe(token);
+    if (userId == null || userId.isEmpty) {
+      throw Exception('Could not determine user id from server.');
+    }
+
+    return AuthResult(token: token, userId: userId);
+  }
+
+  /// POST /api/auth/register  (fallback: /auth/register)
+  /// Accepts { fullName, email, password }
+  /// Returns AuthResult(token, userId)
+  Future<AuthResult> register({
+    required String fullName,
+    required String email,
+    required String password,
+    Duration timeout = const Duration(seconds: 90),
+  }) async {
+    final primary = Uri.parse('$_base/api/auth/register');
+    final fallback = Uri.parse('$_base/auth/register'); // legacy (no /api)
+
+    http.Response res = await _postJsonWithLogging(
+      uri: primary,
+      body: {'fullName': fullName, 'email': email, 'password': password},
+      timeout: timeout,
+      label: 'register(primary)',
+    );
+
+    if (res.statusCode == 404) {
+      res = await _postJsonWithLogging(
+        uri: fallback,
+        body: {'fullName': fullName, 'email': email, 'password': password},
+        timeout: timeout,
+        label: 'register(fallback)',
+      );
+    }
+
+    _throwOnNon2xx(res, defaultMsg: 'Registration failed');
+
+    final body = _decodeBodyAsMap(res.body);
+    final token = _firstString(body, const ['token', 'jwt', 'accessToken']);
+    if (token == null || token.isEmpty) {
+      throw Exception('Malformed response from server (missing token).');
+    }
+
+    String? userId =
+        _firstString(body, const ['userId']) ??
+        _firstString(body['user'] as Map<String, dynamic>?, const ['id']) ??
+        _firstString(
+          (body['data'] as Map?)?['user'] as Map<String, dynamic>?,
+          const ['id'],
+        );
+
+    userId ??= await _fetchUserIdViaMe(token);
+    if (userId == null || userId.isEmpty) {
+      throw Exception('Could not determine user id from server.');
+    }
+
+    return AuthResult(token: token, userId: userId);
+  }
+
+  Future<String?> _fetchUserIdViaMe(String token) async {
+    final primary = Uri.parse('$_base/api/auth/me');
+    final fallback = Uri.parse('$_base/auth/me'); // legacy (no /api)
+
+    final resPrimary = await _getWithLogging(
+      uri: primary,
+      headers: {HttpHeaders.authorizationHeader: 'Bearer $token'},
+      label: 'me(primary)',
+      timeout: const Duration(seconds: 15),
+    );
+
+    http.Response res = resPrimary;
+    if (res.statusCode == 404) {
+      res = await _getWithLogging(
+        uri: fallback,
+        headers: {HttpHeaders.authorizationHeader: 'Bearer $token'},
+        label: 'me(fallback)',
+        timeout: const Duration(seconds: 15),
+      );
+    }
+
+    if (res.statusCode != 200) return null;
+
+    final decoded = _decodeBodyAsMap(res.body);
+    final user = decoded['user'];
+    if (user is Map<String, dynamic>) {
+      return _firstString(user, const ['id']);
+    }
+    return null;
+  }
+
+  // ------------ Low-level helpers ------------
+
+  void _throwOnNon2xx(http.Response res, {required String defaultMsg}) {
+    if (res.statusCode >= 200 && res.statusCode < 300) return;
     try {
-      res = await http
+      final m = jsonDecode(res.body);
+      final msg =
+          _firstString(m as Map<String, dynamic>?, const [
+            'error',
+            'message',
+          ]) ??
+          defaultMsg;
+      throw Exception(msg);
+    } catch (_) {
+      throw Exception('HTTP ${res.statusCode}: ${res.body}');
+    }
+  }
+
+  Map<String, dynamic> _decodeBodyAsMap(String body) {
+    final dynamic decoded = jsonDecode(body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('Malformed response from server.');
+    }
+    return decoded;
+  }
+
+  Future<http.Response> _postJsonWithLogging({
+    required Uri uri,
+    required Map<String, dynamic> body,
+    required Duration timeout,
+    required String label,
+  }) async {
+    try {
+      // ignore: avoid_print
+      print('🔐 AuthApi $_base → POST $label: $uri');
+      return await http
           .post(
             uri,
             headers: {
               HttpHeaders.contentTypeHeader: 'application/json',
               HttpHeaders.acceptHeader: 'application/json',
             },
-            body: jsonEncode({'email': email, 'password': password}),
+            body: jsonEncode(body),
           )
           .timeout(timeout);
     } on SocketException {
@@ -44,70 +200,29 @@ class AuthApi {
     } on TlsException catch (e) {
       throw Exception('TLS error: $e');
     }
-
-    // Non-2xx → bubble up backend error text if present
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      try {
-        final m = jsonDecode(res.body);
-        final msg = _firstString(m, const ['error', 'message']) ?? 'Login failed';
-        throw Exception(msg);
-      } catch (_) {
-        throw Exception('HTTP ${res.statusCode}: ${res.body}');
-      }
-    }
-
-    // Parse body (be tolerant to different shapes)
-    final dynamic decoded = jsonDecode(res.body);
-    if (decoded is! Map<String, dynamic>) {
-      throw Exception('Malformed response from server.');
-    }
-    final Map<String, dynamic> body = decoded;
-
-    final token = _firstString(body, const ['token', 'jwt', 'accessToken']);
-    if (token == null || token.isEmpty) {
-      throw Exception('Malformed response from server (missing token).');
-    }
-
-    // Try to extract userId from common shapes
-    String? userId =
-        _firstString(body, const ['userId']) ??
-        _firstString(body['user'] as Map<String, dynamic>?, const ['id']) ??
-        _firstString((body['data'] as Map?)?['user'] as Map<String, dynamic>?, const ['id']);
-
-    // If backend didn’t include userId, fetch it via /me
-    if (userId == null || userId.isEmpty) {
-      userId = await _fetchUserIdViaMe(token);
-      if (userId == null || userId.isEmpty) {
-        throw Exception('Could not determine user id from server.');
-      }
-    }
-
-    return AuthResult(token: token, userId: userId);
   }
 
-  Future<String?> _fetchUserIdViaMe(String token) async {
-    final uri = Uri.parse('$_base/api/auth/me');
+  Future<http.Response> _getWithLogging({
+    required Uri uri,
+    required Map<String, String> headers,
+    required String label,
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
     try {
-      final res = await http.get(
-        uri,
-        headers: {
-          HttpHeaders.authorizationHeader: 'Bearer $token',
-          HttpHeaders.acceptHeader: 'application/json',
-        },
-      ).timeout(const Duration(seconds: 15));
-
-      if (res.statusCode != 200) return null;
-
-      final dynamic decoded = jsonDecode(res.body);
-      if (decoded is! Map<String, dynamic>) return null;
-
-      final user = decoded['user'];
-      if (user is Map<String, dynamic>) {
-        return _firstString(user, const ['id']);
-      }
-      return null;
-    } catch (_) {
-      return null;
+      // ignore: avoid_print
+      print('🔐 AuthApi $_base → GET $label: $uri');
+      return await http
+          .get(
+            uri,
+            headers: {...headers, HttpHeaders.acceptHeader: 'application/json'},
+          )
+          .timeout(timeout);
+    } on SocketException {
+      throw Exception('Cannot reach server at ${AppConfig.apiBaseUrl}');
+    } on HttpException catch (e) {
+      throw Exception('HTTP error: $e');
+    } on TlsException catch (e) {
+      throw Exception('TLS error: $e');
     }
   }
 
@@ -119,55 +234,5 @@ class AuthApi {
       if (v is String && v.trim().isNotEmpty) return v.trim();
     }
     return null;
-=======
-import 'package:http/http.dart' as http;
-import '../../services/api_client.dart';
-
-class AuthException implements Exception {
-  final String message;
-  final int? status;
-  AuthException(this.message, {this.status});
-  @override
-  String toString() => 'AuthException($status): $message';
-}
-
-class AuthApi {
-  /// POST /api/auth/login
-  static Future<Map<String, dynamic>> login(
-    String email,
-    String password,
-  ) async {
-    final http.Response res = await ApiClient.postJson('/api/auth/login', {
-      'email': email,
-      'password': password,
-    });
-
-    if (res.statusCode == 200) {
-      return jsonDecode(res.body) as Map<String, dynamic>;
-    }
-    throw AuthException(_extractError(res), status: res.statusCode);
-  }
-
-  /// POST /api/auth/register (ready if/when you hook up the Register screen)
-  static Future<Map<String, dynamic>> register(
-    Map<String, Object?> payload,
-  ) async {
-    final res = await ApiClient.postJson('/api/auth/register', payload);
-    if (res.statusCode == 200 || res.statusCode == 201) {
-      return jsonDecode(res.body) as Map<String, dynamic>;
-    }
-    throw AuthException(_extractError(res), status: res.statusCode);
-  }
-
-  static String _extractError(http.Response res) {
-    try {
-      final body = jsonDecode(res.body);
-      final msg = body['error'] ?? body['message'];
-      return (msg is String && msg.trim().isNotEmpty)
-          ? msg
-          : 'Request failed (${res.statusCode}).';
-    } catch (_) {
-      return 'Request failed (${res.statusCode}).';
-    }
   }
 }

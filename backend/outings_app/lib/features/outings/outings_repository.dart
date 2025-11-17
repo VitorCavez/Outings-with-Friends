@@ -120,7 +120,8 @@ class OutingsRepository {
       // 👇 fallback to Outbox when offline
       final clientId = await OutboxService.instance.enqueueOutingCreate(
         title: draft.title,
-        date: draft.startsAt, // 'date' expected by server (vs. startsAt UI model)
+        // startsAt is nullable in the UI model; Outbox expects a non-null DateTime.
+        date: draft.startsAt ?? DateTime.now(),
         location: draft.location,
         description: draft.description,
       );
@@ -128,7 +129,7 @@ class OutingsRepository {
         id: 'local-$clientId',
         title: draft.title,
         location: draft.location,
-        startsAt: draft.startsAt,
+        startsAt: draft.startsAt ?? DateTime.now(),
         description: draft.description,
         isLocalOnly: true, // optional field in Outing model
       );

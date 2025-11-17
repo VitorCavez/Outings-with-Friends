@@ -46,9 +46,9 @@ class _ItineraryTimelineState extends State<ItineraryTimeline> {
       setState(() => _items = list);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load itinerary: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to load itinerary: $e')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -61,6 +61,9 @@ class _ItineraryTimelineState extends State<ItineraryTimeline> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final subtle = scheme.onSurfaceVariant;
+
     if (_loading) {
       return const Padding(
         padding: EdgeInsets.all(16.0),
@@ -73,6 +76,7 @@ class _ItineraryTimelineState extends State<ItineraryTimeline> {
         child: Text('No itinerary yet. Add steps from the Plan tab.'),
       );
     }
+
     return ListView.separated(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -83,38 +87,44 @@ class _ItineraryTimelineState extends State<ItineraryTimeline> {
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // timeline dot
+            // timeline dot + line
             Column(
               children: [
                 Container(
-                  width: 14, height: 14,
+                  width: 14,
+                  height: 14,
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primary,
+                    color: scheme.primary,
                     shape: BoxShape.circle,
                   ),
                 ),
                 if (i != _items.length - 1)
                   Container(
-                    width: 2, height: 40,
+                    width: 2,
+                    height: 40,
                     color: Theme.of(context).dividerColor,
                   ),
               ],
             ),
             const SizedBox(width: 12),
+
             // content
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(it.title, style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    it.title,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                   const SizedBox(height: 4),
                   if (it.locationName != null)
-                    Text(it.locationName!, style: const TextStyle(color: Colors.black54)),
+                    Text(it.locationName!, style: TextStyle(color: subtle)),
                   if (it.startTime != null || it.endTime != null)
                     Text(
                       '${_fmt(it.startTime)}'
                       '${it.endTime != null ? ' → ${DateFormat('HH:mm').format(it.endTime!)}' : ''}',
-                      style: const TextStyle(color: Colors.black54),
+                      style: TextStyle(color: subtle),
                     ),
                   if (it.notes?.isNotEmpty == true) ...[
                     const SizedBox(height: 6),

@@ -8,32 +8,13 @@ class GroupService {
   final ApiClient api;
 
   // ---------------------------------------------------------------------------
-  // Helpers: be tolerant to {data: ...}, {ok: true, data: ...}, or raw payloads
+  // Helpers: accept {data: ...}, {ok: true, data: ...}, arrays, or raw payloads
   // ---------------------------------------------------------------------------
-  T _unwrap<T>(dynamic body) {
-    // If server sent a JSON string, decode first
-    final dynamic json = body is String ? jsonDecode(body) : body;
-
-    if (json is Map<String, dynamic>) {
-      if (json.containsKey('data')) {
-        final d = json['data'];
-        if (T == List && d is List) return d as T;
-        if (d is T) return d;
-      }
-      // If handler returned the entity directly (e.g. a Group object)
-      if (json is T) return json;
-    }
-    if (json is T) return json;
-    throw StateError('Unexpected response shape for $T');
-  }
-
   List<dynamic> _asList(dynamic body) {
     final dynamic json = body is String ? jsonDecode(body) : body;
     if (json is List) return json;
     if (json is Map && json['data'] is List) return (json['data'] as List);
-    // Some routes might return { ok, items: [...] }
     if (json is Map && json['items'] is List) return (json['items'] as List);
-    // Fallback to empty
     return const [];
   }
 
@@ -42,7 +23,7 @@ class GroupService {
     if (json is Map<String, dynamic>) return json;
     if (json is Map) return Map<String, dynamic>.from(json);
     if (json is String) return jsonDecode(json) as Map<String, dynamic>;
-    throw StateError('Expected Map JSON response');
+    return <String, dynamic>{};
   }
 
   Map<String, String>? _authHeaderOrNull() {
@@ -115,7 +96,7 @@ class GroupService {
   }
 
   // ---------------------------------------------------------------------------
-  // Group profile (keeps compatibility with both legacy & new fields)
+  // Group profile
   // ---------------------------------------------------------------------------
 
   /// GET /api/groups/:groupId/profile
@@ -124,8 +105,8 @@ class GroupService {
     if (r.statusCode != 200) {
       throw Exception('Get group profile failed (${r.statusCode})');
     }
-    // tolerate: {data:{...}} or {...}
-    return _asMap(r.body)['data'] as Map<String, dynamic>? ?? _asMap(r.body);
+    final m = _asMap(r.body);
+    return (m['data'] as Map<String, dynamic>? ?? m);
   }
 
   /// PUT /api/groups/:groupId/profile
@@ -150,13 +131,15 @@ class GroupService {
       if (visibility != null) 'visibility': visibility,
       if (defaultBudgetMin != null) 'defaultBudgetMin': defaultBudgetMin,
       if (defaultBudgetMax != null) 'defaultBudgetMax': defaultBudgetMax,
-      if (preferredOutingTypes != null) 'preferredOutingTypes': preferredOutingTypes,
+      if (preferredOutingTypes != null)
+        'preferredOutingTypes': preferredOutingTypes,
     };
     final r = await api.putJson('/api/groups/$groupId/profile', body);
     if (r.statusCode != 200) {
       throw Exception('Update group profile failed (${r.statusCode})');
     }
-    return _asMap(r.body)['data'] as Map<String, dynamic>? ?? _asMap(r.body);
+    final m = _asMap(r.body);
+    return (m['data'] as Map<String, dynamic>? ?? m);
   }
 
   // ---------------------------------------------------------------------------
@@ -164,7 +147,6 @@ class GroupService {
   // ---------------------------------------------------------------------------
 
   /// GET /api/groups/:groupId/members
-  /// Your current backend returns a raw array (mapped users). We accept both.
   Future<List<dynamic>> listMembers(String groupId) async {
     final r = await api.get('/api/groups/$groupId/members');
     if (r.statusCode != 200) {
@@ -173,10 +155,12 @@ class GroupService {
     return _asList(r.body);
   }
 
-  /// Preferred: explicit promote/demote actions (matches new backend routes)
   /// POST /api/groups/:groupId/members/:userId/promote
   Future<void> promoteMember(String groupId, String userId) async {
-    final r = await api.postJson('/api/groups/$groupId/members/$userId/promote', {});
+    final r = await api.postJson(
+      '/api/groups/$groupId/members/$userId/promote',
+      {},
+    );
     if (r.statusCode != 200) {
       throw Exception('Promote failed (${r.statusCode})');
     }
@@ -184,17 +168,25 @@ class GroupService {
 
   /// POST /api/groups/:groupId/members/:userId/demote
   Future<void> demoteMember(String groupId, String userId) async {
-    final r = await api.postJson('/api/groups/$groupId/members/$userId/demote', {});
+    final r = await api.postJson(
+      '/api/groups/$groupId/members/$userId/demote',
+      {},
+    );
     if (r.statusCode != 200) {
       throw Exception('Demote failed (${r.statusCode})');
     }
   }
 
-  /// Back-compat: PUT /api/groups/:groupId/members/:userId/role with a role string
-  /// If the backend doesn’t support this, call promote/demote instead.
-  Future<void> updateMemberRole(String groupId, String userId, String role) async {
+  /// Back-compat: PUT /api/groups/:groupId/members/:userId/role
+  Future<void> updateMemberRole(
+    String groupId,
+    String userId,
+    String role,
+  ) async {
     try {
-      final r = await api.putJson('/api/groups/$groupId/members/$userId/role', {'role': role});
+      final r = await api.putJson('/api/groups/$groupId/members/$userId/role', {
+        'role': role,
+      });
       if (r.statusCode != 200) {
         throw Exception('Update role failed (${r.statusCode})');
       }
@@ -215,10 +207,15 @@ class GroupService {
     }
   }
 
-  /// Optional (only if backend supports pinned members)
-  /// POST /api/groups/:groupId/members/:userId/pin { pinned: bool }
-  Future<void> setMemberPinned(String groupId, String userId, bool pinned) async {
-    final r = await api.postJson('/api/groups/$groupId/members/$userId/pin', {'pinned': pinned});
+  /// Optional: POST /api/groups/:groupId/members/:userId/pin { pinned: bool }
+  Future<void> setMemberPinned(
+    String groupId,
+    String userId,
+    bool pinned,
+  ) async {
+    final r = await api.postJson('/api/groups/$groupId/members/$userId/pin', {
+      'pinned': pinned,
+    });
     if (r.statusCode != 200) {
       throw Exception('Pin/unpin failed (${r.statusCode})');
     }
@@ -288,7 +285,6 @@ class GroupService {
     if (r.statusCode != 200) {
       throw Exception('Discover groups failed (${r.statusCode})');
     }
-    // Expect { ok, total, limit, offset, data } OR any map
     return _asMap(r.body);
   }
 
@@ -298,9 +294,17 @@ class GroupService {
     if (r.statusCode != 200) {
       throw Exception('Get group failed (${r.statusCode})');
     }
-    // Your current GET returns the group object directly (no {data})
     final m = _asMap(r.body);
     return (m['data'] as Map<String, dynamic>? ?? m);
+  }
+
+  /// GET /api/groups/mine
+  Future<List<dynamic>> listMyGroups() async {
+    final r = await api.get('/api/groups/mine');
+    if (r.statusCode != 200) {
+      throw Exception('List my groups failed (${r.statusCode})');
+    }
+    return _asList(r.body);
   }
 
   /// POST /api/groups/:groupId/join

@@ -1,24 +1,38 @@
+// lib/features/messages/widgets/date_divider.dart
 import 'package:flutter/material.dart';
 
 class DateDivider extends StatelessWidget {
-  final String label;
   const DateDivider(this.label, {super.key});
+  final String label;
 
   @override
   Widget build(BuildContext context) {
+    final c = Theme.of(context).colorScheme;
+    final textStyle = Theme.of(context).textTheme.labelMedium?.copyWith(
+      color: c.onSurfaceVariant,
+      fontWeight: FontWeight.w600,
+    );
+
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Row(
         children: [
-          const Expanded(child: Divider(thickness: 1)),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Text(
-              label,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
-            ),
+          Expanded(
+            child: Divider(height: 1, thickness: 1, color: c.outlineVariant),
           ),
-          const Expanded(child: Divider(thickness: 1)),
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: c.surfaceVariant,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: c.outlineVariant),
+            ),
+            child: Text(label, style: textStyle),
+          ),
+          Expanded(
+            child: Divider(height: 1, thickness: 1, color: c.outlineVariant),
+          ),
         ],
       ),
     );

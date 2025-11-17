@@ -42,9 +42,9 @@ class _OutingHistoryListState extends State<OutingHistoryList> {
       setState(() => _items = rows);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load history: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to load history: $e')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -68,17 +68,29 @@ class _OutingHistoryListState extends State<OutingHistoryList> {
             ChoiceChip(
               label: const Text('All'),
               selected: _role == 'all',
-              onSelected: (v) => setState(() => _role = 'all'),
+              onSelected: (v) {
+                if (!v) return;
+                setState(() => _role = 'all');
+                _load();
+              },
             ),
             ChoiceChip(
               label: const Text('Host'),
               selected: _role == 'host',
-              onSelected: (v) => setState(() => _role = 'host'),
+              onSelected: (v) {
+                if (!v) return;
+                setState(() => _role = 'host');
+                _load();
+              },
             ),
             ChoiceChip(
               label: const Text('Guest'),
               selected: _role == 'guest',
-              onSelected: (v) => setState(() => _role = 'guest'),
+              onSelected: (v) {
+                if (!v) return;
+                setState(() => _role = 'guest');
+                _load();
+              },
             ),
             IconButton(
               tooltip: 'Refresh',

@@ -46,9 +46,9 @@ class _OutingImageUploaderState extends State<OutingImageUploader> {
       setState(() => _images = list);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Load images failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Load images failed: $e')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -72,13 +72,17 @@ class _OutingImageUploaderState extends State<OutingImageUploader> {
       await _fetchImages();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(source == ImageSource.camera ? 'Photo captured' : 'Image uploaded')),
+        SnackBar(
+          content: Text(
+            source == ImageSource.camera ? 'Photo captured' : 'Image uploaded',
+          ),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Upload error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Upload error: $e')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -94,14 +98,14 @@ class _OutingImageUploaderState extends State<OutingImageUploader> {
       );
       await _fetchImages();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unsplash image added')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Unsplash image added')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Add from Unsplash failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Add from Unsplash failed: $e')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -126,6 +130,7 @@ class _OutingImageUploaderState extends State<OutingImageUploader> {
   }
 
   void _showPickSheet() {
+    final scheme = Theme.of(context).colorScheme;
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -157,7 +162,7 @@ class _OutingImageUploaderState extends State<OutingImageUploader> {
                 ),
                 const Divider(),
                 ListTile(
-                  leading: const Icon(Icons.close),
+                  leading: Icon(Icons.delete_outline, color: scheme.error),
                   title: const Text('Cancel'),
                   onTap: () => Navigator.pop(ctx),
                 ),
@@ -170,6 +175,7 @@ class _OutingImageUploaderState extends State<OutingImageUploader> {
   }
 
   Future<void> _confirmAndDelete(OutingImage img) async {
+    final scheme = Theme.of(context).colorScheme;
     final confirmed = await showModalBottomSheet<bool>(
       context: context,
       showDragHandle: true,
@@ -183,7 +189,7 @@ class _OutingImageUploaderState extends State<OutingImageUploader> {
             runSpacing: 8,
             children: [
               ListTile(
-                leading: const Icon(Icons.delete_outline, color: Colors.red),
+                leading: Icon(Icons.delete_outline, color: scheme.error),
                 title: const Text('Delete photo'),
                 onTap: () => Navigator.pop(ctx, true),
               ),
@@ -207,20 +213,20 @@ class _OutingImageUploaderState extends State<OutingImageUploader> {
       if (!mounted) return;
       if (ok) {
         setState(() => _images.removeWhere((e) => e.id == img.id));
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Photo deleted')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Photo deleted')));
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Delete failed')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Delete failed')));
         await _fetchImages();
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Delete error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete error: $e')));
     } finally {
       if (mounted) setState(() => _deleting.remove(img.id));
     }
@@ -229,6 +235,8 @@ class _OutingImageUploaderState extends State<OutingImageUploader> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final subtle = scheme.onSurfaceVariant;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -261,7 +269,7 @@ class _OutingImageUploaderState extends State<OutingImageUploader> {
         if (_images.isEmpty && !_loading)
           Text(
             'No images yet. Be the first to add one!',
-            style: theme.textTheme.bodyMedium?.copyWith(color: Colors.black54),
+            style: theme.textTheme.bodyMedium?.copyWith(color: subtle),
           ),
 
         if (_images.isNotEmpty)
@@ -289,17 +297,20 @@ class _OutingImageUploaderState extends State<OutingImageUploader> {
                       child: CachedNetworkImage(
                         imageUrl: img.imageUrl,
                         fit: BoxFit.cover,
-                        placeholder: (c, _) => Container(color: Colors.black12),
-                        errorWidget: (c, _, __) => const ColoredBox(
-                          color: Color(0x11000000),
-                          child: Icon(Icons.broken_image_outlined),
+                        placeholder: (c, _) =>
+                            ColoredBox(color: scheme.surfaceVariant),
+                        errorWidget: (c, _, __) => ColoredBox(
+                          color: scheme.surfaceVariant.withOpacity(0.6),
+                          child: const Icon(Icons.broken_image_outlined),
                         ),
                       ),
                     ),
                     if (deleting)
                       Container(
                         decoration: BoxDecoration(
-                          color: Colors.black38,
+                          color: (theme.colorScheme.scrim).withOpacity(
+                            0.45,
+                          ), // subtle overlay
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: const Center(

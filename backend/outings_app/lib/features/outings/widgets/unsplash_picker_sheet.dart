@@ -41,9 +41,9 @@ class _UnsplashPickerSheetState extends State<UnsplashPickerSheet> {
       setState(() => _results = res);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Search error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Search error: $e')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -52,15 +52,23 @@ class _UnsplashPickerSheetState extends State<UnsplashPickerSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final subtle = theme.colorScheme.onSurfaceVariant;
+
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(height: 4, width: 40, margin: const EdgeInsets.only(bottom: 12), decoration: BoxDecoration(
-              color: theme.dividerColor, borderRadius: BorderRadius.circular(4),
-            )),
+            Container(
+              height: 4,
+              width: 40,
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: theme.dividerColor,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
             Row(
               children: [
                 Expanded(
@@ -84,14 +92,20 @@ class _UnsplashPickerSheetState extends State<UnsplashPickerSheet> {
             if (_loading) const LinearProgressIndicator(),
             const SizedBox(height: 8),
             if (_results.isEmpty && !_loading)
-              const Text('No results yet. Try another search.'),
+              Text(
+                'No results yet. Try another search.',
+                style: TextStyle(color: subtle),
+              ),
             if (_results.isNotEmpty)
               Flexible(
                 child: GridView.builder(
                   shrinkWrap: true,
                   itemCount: _results.length,
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3, mainAxisSpacing: 8, crossAxisSpacing: 8, childAspectRatio: 1,
+                    crossAxisCount: 3,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                    childAspectRatio: 1,
                   ),
                   itemBuilder: (ctx, i) {
                     final p = _results[i];
@@ -105,7 +119,9 @@ class _UnsplashPickerSheetState extends State<UnsplashPickerSheet> {
                         child: CachedNetworkImage(
                           imageUrl: p.thumbUrl,
                           fit: BoxFit.cover,
-                          placeholder: (c, _) => Container(color: Colors.black12),
+                          placeholder: (c, _) => Container(
+                            color: theme.colorScheme.surfaceVariant,
+                          ),
                         ),
                       ),
                     );

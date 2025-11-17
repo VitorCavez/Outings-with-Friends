@@ -2,7 +2,11 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:go_router/go_router.dart';
+
 import 'profile_provider.dart';
+// Use the correct relative path from /features/profile/
+import '../auth/auth_provider.dart';
 
 class MyProfilePage extends StatefulWidget {
   const MyProfilePage({super.key});
@@ -34,7 +38,9 @@ class _MyProfilePageState extends State<MyProfilePage> {
       allowMultiple: false,
     );
     if (res != null && res.files.single.path != null) {
-      await context.read<ProfileProvider>().setAvatarPath(res.files.single.path);
+      await context.read<ProfileProvider>().setAvatarPath(
+        res.files.single.path,
+      );
     }
   }
 
@@ -45,7 +51,9 @@ class _MyProfilePageState extends State<MyProfilePage> {
   Future<void> _saveName() async {
     await context.read<ProfileProvider>().setDisplayName(_nameCtrl.text);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile saved')));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Profile saved')));
   }
 
   @override
@@ -54,7 +62,48 @@ class _MyProfilePageState extends State<MyProfilePage> {
     final avatar = profile.avatarImageProvider();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('My Profile')),
+      appBar: AppBar(
+        title: const Text('My Profile'),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (v) async {
+              if (v == 'view_public') {
+                final uid = context.read<AuthProvider?>()?.currentUserId;
+                if (uid == null || uid.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Not logged in')),
+                  );
+                  return;
+                }
+                // Push to the public Profile page route
+                context.push('/profile/$uid');
+              } else if (v == 'logout') {
+                final auth = context.read<AuthProvider>();
+                await auth.signOut(context);
+              }
+            },
+            itemBuilder: (ctx) => const [
+              PopupMenuItem(
+                value: 'view_public',
+                child: ListTile(
+                  leading: Icon(Icons.person_search_outlined),
+                  title: Text('View public profile'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'logout',
+                child: ListTile(
+                  leading: Icon(Icons.logout),
+                  title: Text('Log out'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -66,8 +115,14 @@ class _MyProfilePageState extends State<MyProfilePage> {
                   backgroundImage: avatar,
                   child: avatar == null
                       ? Text(
-                          (profile.displayName.isNotEmpty ? profile.displayName[0] : 'Y').toUpperCase(),
-                          style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
+                          (profile.displayName.isNotEmpty
+                                  ? profile.displayName[0]
+                                  : 'Y')
+                              .toUpperCase(),
+                          style: const TextStyle(
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
+                          ),
                         )
                       : null,
                 ),
@@ -79,7 +134,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
                     icon: const Icon(Icons.edit),
                     tooltip: 'Change photo',
                   ),
-                )
+                ),
               ],
             ),
           ),
@@ -94,7 +149,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
           const SizedBox(height: 12),
           Row(
             children: [
-              ElevatedButton.icon(
+              FilledButton.icon(
                 onPressed: _saveName,
                 icon: const Icon(Icons.check),
                 label: const Text('Save'),
