@@ -1,56 +1,111 @@
 // backend/src/routes/users.js
 const express = require('express');
-const jwt = require('jsonwebtoken');
-
 const router = express.Router();
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
 
 /**
- * Optional JWT decode:
- * - If an Authorization: Bearer <token> header is present, we decode it.
- * - If it's missing or invalid, we just proceed without a user (public routes still work).
+ * If you already have auth middleware that sets req.user from your JWT,
+ * delete this and use yours. Otherwise this protects the /me/* endpoints.
  */
-function authOptional(req, _res, next) {
-  try {
-    const hdr = req.headers.authorization || '';
-    const [, token] = hdr.split(' ');
-    if (token) {
-      const secret = process.env.JWT_SECRET || 'changeme';
-      req.user = jwt.verify(token, secret);
-    }
-  } catch (_) {
-    // ignore invalid token; route can decide to require auth if needed
-  }
+function requireAuth(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'UNAUTHENTICATED' });
   next();
 }
 
-router.use(authOptional);
+/**
+ * GET /api/users/:userId/profile
+ * Public profile for a given user. Respects isProfilePublic unless it's the same user.
+ * Shape matches what ProfilePage expects.
+ */
+router.get('/:userId/profile', async (req, res) => {
+  const { userId } = req.params;
 
-// Simple health for diagnostics
-router.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'users', ts: Date.now() });
-});
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      fullName: true,
+      username: true,
+      profilePhotoUrl: true,
+      homeLocation: true,
+      bio: true,
+      badges: true,          // String[]
+      outingScore: true,     // Int
+      isProfilePublic: true,
+    },
+  });
 
-// Quick ping
-router.get('/ping', (_req, res) => {
-  res.type('text/plain').send('pong');
+  if (!user) return res.status(404).json({ error: 'NOT_FOUND' });
+
+  const isMe = req.user && req.user.id === userId;
+  if (!user.isProfilePublic && !isMe) {
+    // You already handle PROFILE_PRIVATE in the Flutter page
+    return res.status(403).json({ error: 'PROFILE_PRIVATE' });
+  }
+
+  res.json({
+    data: {
+      id: user.id,
+      fullName: user.fullName,
+      username: user.username,
+      profilePhotoUrl: user.profilePhotoUrl,
+      homeLocation: user.homeLocation,
+      bio: user.bio,
+      badges: user.badges || [],
+      outingScore: user.outingScore ?? 0,
+    },
+  });
 });
 
 /**
- * Return the current user info (if JWT is present).
- * If no token or invalid token, return 401.
+ * GET /api/users/me/favorites
+ * Lists the current user's favourited outings with a nested `outing` object.
+ * The Flutter page expects: [{ id, outingId, createdAt, outing: { id,title,locationName,dateTimeStart,coverImageUrl } }]
  */
-router.get('/me', (req, res) => {
-  if (!req.user) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  // Return only safe/basic fields that are commonly in your token.
-  const { id, userId, email, username } = req.user;
-  res.json({
-    id: id || userId || null,
-    email: email || null,
-    username: username || null,
-    tokenClaims: req.user, // helpful while stabilizing; remove later if you prefer
+router.get('/me/favorites', requireAuth, async (req, res) => {
+  const userId = req.user.id;
+
+  const favs = await prisma.favorite.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      userId: true,
+      outingId: true,
+      createdAt: true,
+      outing: {
+        select: {
+          id: true,
+          title: true,
+          locationName: true,
+          dateTimeStart: true,
+          // There is no coverImageUrl column on Outing, so use the most recent OutingImage
+          images: {
+            take: 1,
+            orderBy: { createdAt: 'desc' },
+            select: { imageUrl: true },
+          },
+        },
+      },
+    },
   });
+
+  const shaped = favs.map(f => ({
+    id: f.id,
+    userId: f.userId,
+    outingId: f.outingId,
+    createdAt: f.createdAt,
+    outing: f.outing && {
+      id: f.outing.id,
+      title: f.outing.title,
+      locationName: f.outing.locationName,
+      dateTimeStart: f.outing.dateTimeStart,
+      coverImageUrl: f.outing.images?.[0]?.imageUrl ?? null,
+    },
+  }));
+
+  res.json({ data: shaped });
 });
 
 module.exports = router;

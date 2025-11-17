@@ -2,8 +2,7 @@
 const prisma = require('../../prisma/client');
 
 function getAuthUserId(req) {
-  // Wire this to your auth middleware later; for now support header override
-  return req.user?.id || req.headers['x-user-id'] || null;
+  return req.user?.userId || null;
 }
 
 async function isGroupAdmin(userId, groupId) {
@@ -23,6 +22,14 @@ async function isGroupAdmin(userId, groupId) {
   return !!member && (member.isAdmin === true || member.role === 'admin');
 }
 
+function cryptoRandom() {
+  try {
+    return require('crypto').randomUUID();
+  } catch {
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+}
+
 /**
  * POST /api/groups/:groupId/invites
  * Body: { inviteeUserId?, inviteeEmail?, message?, expiresAt? }
@@ -40,18 +47,17 @@ exports.createInvite = async (req, res) => {
       return res.status(400).json({ ok: false, error: 'INVITEE_REQUIRED' });
     }
 
-    // Only admins/creators can invite
     if (!(await isGroupAdmin(inviterId, groupId))) {
       return res.status(403).json({ ok: false, error: 'FORBIDDEN' });
     }
 
-    // Avoid duplicate pending invite to the same target
+    // Avoid duplicate pending invite to same target
     const existing = await prisma.groupInvite.findFirst({
       where: {
         groupId,
         status: 'pending',
         OR: [
-          inviteeUserId ? { inviteeUserId } : { id: '_no_user_' }, // impossible match if null
+          inviteeUserId ? { inviteeUserId } : { id: '_no_user_' },
           inviteeEmail ? { inviteeEmail } : { id: '_no_email_' },
         ],
       },
@@ -60,7 +66,6 @@ exports.createInvite = async (req, res) => {
       return res.status(409).json({ ok: false, error: 'INVITE_ALREADY_PENDING', data: existing });
     }
 
-    // Create
     const invite = await prisma.groupInvite.create({
       data: {
         groupId,
@@ -69,7 +74,7 @@ exports.createInvite = async (req, res) => {
         inviteeEmail: inviteeEmail || null,
         message: message || null,
         status: 'pending',
-        token: cryptoRandom(), // optional use (email links etc.)
+        token: cryptoRandom(),
         expiresAt: expiresAt ? new Date(expiresAt) : null,
       },
     });
@@ -238,12 +243,3 @@ exports.cancelInvite = async (req, res) => {
     return res.status(500).json({ ok: false, error: 'SERVER_ERROR' });
   }
 };
-
-function cryptoRandom() {
-  try {
-    // Node 18+ has crypto.randomUUID
-    return require('crypto').randomUUID();
-  } catch {
-    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  }
-}

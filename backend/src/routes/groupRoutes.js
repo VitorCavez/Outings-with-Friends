@@ -1,85 +1,348 @@
+// backend/src/routes/groupRoutes.js
 const express = require('express');
-const router = express.Router();
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const router = express.Router({ mergeParams: true });
+const { GroupRole } = require('@prisma/client');
+const prisma = require('../../prisma/client');
 
-// ✅ POST /api/groups - Create a group
-const { requireFields } = require('../utils/validators');
+const { requireAuth } = require('../middleware/auth'); // uses req.user.userId
 
-router.post('/:groupId/join', async (req, res) => {
-  const { groupId } = req.params;
-  const { userId, isAdmin = false } = req.body;
+// ---------- helpers ----------
+async function isGroupAdminOrOwner(groupId, userId) {
+  const g = await prisma.group.findUnique({
+    where: { id: groupId },
+    select: { createdById: true },
+  });
+  if (!g) return false;
+  if (g.createdById === userId) return true;
 
-  if (!groupId || !userId) {
-    return res.status(400).json({ error: 'Both groupId and userId are required.' });
-  }
+  const m = await prisma.groupMembership.findFirst({
+    where: { groupId, userId },
+    select: { role: true, isAdmin: true },
+  });
 
+  return !!m && (m.role === 'admin' || m.isAdmin === true);
+}
+
+// ---------- CREATE ----------
+/**
+ * POST /api/groups
+ * body: { name, description?, coverImageUrl?, visibility? }
+ */
+router.post('/', requireAuth, async (req, res) => {
   try {
-    const existing = await prisma.groupMembership.findFirst({
-      where: { groupId, userId },
+    const me = req.user.userId;
+    const { name, description, coverImageUrl, visibility } = req.body || {};
+    if (!name) return res.status(400).json({ error: 'name is required' });
+
+    const group = await prisma.group.create({
+      data: {
+        name,
+        description: description ?? null,
+        coverImageUrl: coverImageUrl ?? null,
+        visibility: visibility ?? 'private',
+        createdById: me,
+      },
     });
 
-    if (existing) {
-      return res.status(409).json({ error: 'User already in group.' });
+    // Auto-join creator as admin (requires @@unique([userId, groupId]) in schema)
+    await prisma.groupMembership.upsert({
+      where: { userId_groupId: { userId: me, groupId: group.id } },
+      update: { role: GroupRole.admin, isAdmin: true },
+      create: { userId: me, groupId: group.id, role: GroupRole.admin, isAdmin: true },
+    });
+
+    res.status(201).json({ ok: true, data: group });
+  } catch (err) {
+    console.error('create group error:', err);
+    res.status(500).json({ error: 'SERVER_ERROR' });
+  }
+});
+
+// ---------- MY GROUPS (for Groups tab) ----------
+/**
+ * GET /api/groups/mine?limit=20&offset=0
+ */
+router.get('/mine', requireAuth, async (req, res) => {
+  try {
+    const me = req.user.userId;
+    const limit = Math.min(parseInt(req.query.limit || '20', 10), 50);
+    const offset = parseInt(req.query.offset || '0', 10);
+
+    // Order memberships by the GROUP's createdAt (membership has no createdAt in your schema)
+    let memberships;
+    try {
+      memberships = await prisma.groupMembership.findMany({
+        where: { userId: me },
+        orderBy: { group: { createdAt: 'desc' } }, // relation orderBy (Prisma supports this)
+        include: {
+          group: {
+            select: {
+              id: true,
+              name: true,
+              description: true,
+              coverImageUrl: true,
+              visibility: true,
+              createdAt: true,
+              createdById: true,
+              _count: { select: { members: true } },
+            },
+          },
+        },
+        skip: offset,
+        take: limit,
+      });
+    } catch {
+      // Fallback if your Prisma version doesn’t like relation orderBy
+      memberships = await prisma.groupMembership.findMany({
+        where: { userId: me },
+        orderBy: { id: 'desc' },
+        include: {
+          group: {
+            select: {
+              id: true,
+              name: true,
+              description: true,
+              coverImageUrl: true,
+              visibility: true,
+              createdAt: true,
+              createdById: true,
+              _count: { select: { members: true } },
+            },
+          },
+        },
+        skip: offset,
+        take: limit,
+      });
     }
 
-    const membership = await prisma.groupMembership.create({
-      data: { groupId, userId, isAdmin },
-    });
+    const rows = memberships
+      .map((m) =>
+        m.group
+          ? {
+              ...m.group,
+              myRole: m.role,
+              myIsAdmin: !!m.isAdmin,
+            }
+          : null
+      )
+      .filter(Boolean);
 
-    res.status(201).json({ message: 'User joined group.', membership });
-  } catch (error) {
-    console.error('Join group error:', error);
-    res.status(500).json({ error: 'Internal server error.' });
+    res.json({ ok: true, limit, offset, data: rows });
+  } catch (err) {
+    console.error('my groups error:', err);
+    res.status(500).json({ error: 'SERVER_ERROR' });
   }
 });
 
-
-// ✅ GET /api/groups - List all groups
-router.get('/', async (req, res) => {
+// ---------- DISCOVER ----------
+/**
+ * GET /api/groups/discover?q=term&visibility=public|private|invite_only&limit&offset
+ */
+router.get('/discover', async (req, res) => {
   try {
-    const groups = await prisma.group.findMany();
-    res.json(groups);
-  } catch (error) {
-    console.error('Fetch all groups error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    const q = String(req.query.q || '').trim();
+    const visibility = String(req.query.visibility || 'public').toLowerCase();
+    const limit = Math.min(parseInt(req.query.limit || '20', 10), 50);
+    const offset = parseInt(req.query.offset || '0', 10);
+
+    const where = {
+      visibility: ['public', 'private', 'invite_only'].includes(visibility)
+        ? visibility
+        : 'public',
+      ...(q
+        ? {
+            OR: [
+              { name: { contains: q, mode: 'insensitive' } },
+              { description: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+
+    const [total, rows] = await Promise.all([
+      prisma.group.count({ where }),
+      prisma.group.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }],
+        skip: offset,
+        take: limit,
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          coverImageUrl: true,
+          visibility: true,
+          createdAt: true,
+          createdById: true,
+          _count: { select: { members: true } },
+        },
+      }),
+    ]);
+
+    res.json({ ok: true, total, limit, offset, data: rows });
+  } catch (err) {
+    console.error('discover groups error:', err);
+    res.status(500).json({ error: 'SERVER_ERROR' });
   }
 });
 
-// ✅ POST /api/groups/:groupId/join - Join a group
-router.post('/:groupId/join', async (req, res) => {
-  const { groupId } = req.params;
-  const { userId, isAdmin = false } = req.body;
-
-  if (!userId) {
-    return res.status(400).json({ error: 'User ID is required.' });
-  }
-
+// ---------- UPDATE (owner/admin) ----------
+/**
+ * PATCH /api/groups/:groupId
+ * body: { name?, description?, coverImageUrl?, visibility? }
+ */
+router.patch('/:groupId', requireAuth, async (req, res) => {
   try {
-    const existing = await prisma.groupMembership.findFirst({
-      where: { groupId, userId },
+    const me = req.user.userId;
+    const { groupId } = req.params;
+
+    const can = await isGroupAdminOrOwner(groupId, me);
+    if (!can) return res.status(403).json({ error: 'FORBIDDEN' });
+
+    const { name, description, coverImageUrl, visibility } = req.body || {};
+
+    const group = await prisma.group.update({
+      where: { id: groupId },
+      data: {
+        ...(name !== undefined ? { name } : {}),
+        ...(description !== undefined ? { description } : {}),
+        ...(coverImageUrl !== undefined ? { coverImageUrl } : {}),
+        ...(visibility !== undefined ? { visibility } : {}),
+      },
     });
 
-    if (existing) {
-      return res.status(409).json({ error: 'User already in group.' });
+    res.json({ ok: true, data: group });
+  } catch (err) {
+    console.error('update group error:', err);
+    if (String(err?.code) === 'P2025') {
+      return res.status(404).json({ error: 'GROUP_NOT_FOUND' });
     }
-
-    const membership = await prisma.groupMembership.create({
-      data: { groupId, userId, isAdmin },
-    });
-
-    res.status(201).json({ message: 'User joined group.', membership });
-  } catch (error) {
-    console.error('Join group error:', error);
-    res.status(500).json({ error: 'Internal server error.' });
+    res.status(500).json({ error: 'SERVER_ERROR' });
   }
 });
 
-// ✅ GET /api/groups/:groupId/members - List group members
+// ---------- GROUP PROFILE ----------
+router.get('/:groupId/profile', async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const g = await prisma.group.findUnique({
+      where: { id: groupId },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        coverImageUrl: true,
+        visibility: true,
+        createdAt: true,
+        createdById: true,
+        defaultBudgetMin: true,
+        defaultBudgetMax: true,
+        preferredOutingTypes: true,
+        _count: { select: { members: true, outings: true } },
+      },
+    });
+    if (!g) return res.status(404).json({ error: 'GROUP_NOT_FOUND' });
+    res.json({ ok: true, data: g });
+  } catch (err) {
+    console.error('get group profile error:', err);
+    res.status(500).json({ error: 'SERVER_ERROR' });
+  }
+});
+
+router.put('/:groupId/profile', requireAuth, async (req, res) => {
+  try {
+    const me = req.user.userId;
+    const { groupId } = req.params;
+    const can = await isGroupAdminOrOwner(groupId, me);
+    if (!can) return res.status(403).json({ error: 'FORBIDDEN' });
+
+    const {
+      name,
+      description,
+      coverImageUrl,
+      visibility,
+      defaultBudgetMin,
+      defaultBudgetMax,
+      preferredOutingTypes,
+      groupImageUrl, // legacy → mapped
+      groupVisibility, // legacy → mapped to visibility
+    } = req.body || {};
+
+    const updated = await prisma.group.update({
+      where: { id: groupId },
+      data: {
+        ...(name !== undefined ? { name } : {}),
+        ...(description !== undefined ? { description } : {}),
+        ...(coverImageUrl !== undefined
+          ? { coverImageUrl }
+          : groupImageUrl !== undefined
+          ? { coverImageUrl: groupImageUrl }
+          : {}),
+        ...(visibility !== undefined
+          ? { visibility }
+          : groupVisibility !== undefined
+          ? { visibility: groupVisibility }
+          : {}),
+        ...(defaultBudgetMin !== undefined ? { defaultBudgetMin } : {}),
+        ...(defaultBudgetMax !== undefined ? { defaultBudgetMax } : {}),
+        ...(preferredOutingTypes !== undefined ? { preferredOutingTypes } : {}),
+      },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        coverImageUrl: true,
+        visibility: true,
+        defaultBudgetMin: true,
+        defaultBudgetMax: true,
+        preferredOutingTypes: true,
+      },
+    });
+
+    res.json({ ok: true, data: updated });
+  } catch (err) {
+    console.error('update group profile error:', err);
+    if (String(err?.code) === 'P2025') {
+      return res.status(404).json({ error: 'GROUP_NOT_FOUND' });
+    }
+    res.status(500).json({ error: 'SERVER_ERROR' });
+  }
+});
+
+// ---------- READ ----------
+router.get('/', async (_req, res) => {
+  try {
+    const groups = await prisma.group.findMany({
+      orderBy: [{ createdAt: 'desc' }],
+    });
+    res.json({ ok: true, data: groups });
+  } catch (err) {
+    console.error('list groups error:', err);
+    res.status(500).json({ error: 'SERVER_ERROR' });
+  }
+});
+
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const group = await prisma.group.findUnique({
+      where: { id },
+      include: {
+        _count: { select: { members: true, outings: true } },
+      },
+    });
+    if (!group) return res.status(404).json({ error: 'GROUP_NOT_FOUND' });
+    res.json({ ok: true, data: group });
+  } catch (err) {
+    console.error('get group error:', err);
+    res.status(500).json({ error: 'SERVER_ERROR' });
+  }
+});
+
+// ---------- MEMBERS ----------
 router.get('/:groupId/members', async (req, res) => {
-  const { groupId } = req.params;
-
   try {
+    const { groupId } = req.params;
     const members = await prisma.groupMembership.findMany({
       where: { groupId },
       include: {
@@ -93,51 +356,128 @@ router.get('/:groupId/members', async (req, res) => {
           },
         },
       },
+      orderBy: [{ id: 'asc' }],
     });
 
-    res.json(members.map(m => m.user));
-  } catch (error) {
-    console.error('Fetch group members error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    const data = members.map((m) => ({
+      user: m.user,
+      role: m.role,
+      isAdminLegacy: m.isAdmin ?? false,
+    }));
+
+    res.json({ ok: true, data });
+  } catch (err) {
+    console.error('list members error:', err);
+    res.status(500).json({ error: 'SERVER_ERROR' });
   }
 });
 
-// ✅ GET /api/groups/:id - Get group by ID
-router.get('/:id', async (req, res) => {
-  const { id } = req.params;
+router.post('/:groupId/join', requireAuth, async (req, res) => {
   try {
-    const group = await prisma.group.findUnique({
-      where: { id },
-    });
+    const { groupId } = req.params;
+    const userId = req.body?.userId || req.user.userId;
 
-    if (!group) {
-      return res.status(404).json({ error: 'Group not found' });
+    const existing = await prisma.groupMembership.findFirst({
+      where: { groupId, userId },
+    });
+    if (existing) {
+      return res.status(409).json({ error: 'ALREADY_MEMBER' });
     }
 
-    res.json(group);
-  } catch (error) {
-    console.error('Fetch group by ID error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    const mem = await prisma.groupMembership.create({
+      data: {
+        groupId,
+        userId,
+        role: GroupRole.member,
+        isAdmin: false,
+      },
+    });
+
+    res.status(201).json({ ok: true, data: mem });
+  } catch (err) {
+    console.error('join group error:', err);
+    res.status(500).json({ error: 'SERVER_ERROR' });
   }
 });
 
-// ✅ DELETE /api/groups/:id - Delete a group by ID
-router.delete('/:id', async (req, res) => {
-  const { id } = req.params;
-
+router.delete('/:groupId/members/:userId', requireAuth, async (req, res) => {
   try {
-    // Optional: delete related memberships first
-    await prisma.groupMembership.deleteMany({ where: { groupId: id } });
+    const me = req.user.userId;
+    const { groupId, userId } = req.params;
 
-    // Delete the group itself
-    const deletedGroup = await prisma.group.delete({
-      where: { id },
+    const can = await isGroupAdminOrOwner(groupId, me);
+    if (!can) return res.status(403).json({ error: 'FORBIDDEN' });
+
+    await prisma.groupMembership.deleteMany({
+      where: { groupId, userId },
     });
 
-    res.json({ message: 'Group deleted successfully', deletedGroup });
-  } catch (error) {
-    console.error('Delete group error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('kick member error:', err);
+    res.status(500).json({ error: 'SERVER_ERROR' });
+  }
+});
+
+router.post('/:groupId/members/:userId/promote', requireAuth, async (req, res) => {
+  try {
+    const me = req.user.userId;
+    const { groupId, userId } = req.params;
+
+    const can = await isGroupAdminOrOwner(groupId, me);
+    if (!can) return res.status(403).json({ error: 'FORBIDDEN' });
+
+    const mem = await prisma.groupMembership.updateMany({
+      where: { groupId, userId },
+      data: { role: GroupRole.admin, isAdmin: true },
+    });
+
+    if (mem.count === 0) return res.status(404).json({ error: 'MEMBERSHIP_NOT_FOUND' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('promote error:', err);
+    res.status(500).json({ error: 'SERVER_ERROR' });
+  }
+});
+
+router.post('/:groupId/members/:userId/demote', requireAuth, async (req, res) => {
+  try {
+    const me = req.user.userId;
+    const { groupId, userId } = req.params;
+
+    const can = await isGroupAdminOrOwner(groupId, me);
+    if (!can) return res.status(403).json({ error: 'FORBIDDEN' });
+
+    const mem = await prisma.groupMembership.updateMany({
+      where: { groupId, userId },
+      data: { role: GroupRole.member, isAdmin: false },
+    });
+
+    if (mem.count === 0) return res.status(404).json({ error: 'MEMBERSHIP_NOT_FOUND' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('demote error:', err);
+    res.status(500).json({ error: 'SERVER_ERROR' });
+  }
+});
+
+// ---------- DELETE GROUP (owner only) ----------
+router.delete('/:id', requireAuth, async (req, res) => {
+  try {
+    const me = req.user.userId;
+    const { id } = req.params;
+
+    const g = await prisma.group.findUnique({ where: { id }, select: { createdById: true } });
+    if (!g) return res.status(404).json({ error: 'GROUP_NOT_FOUND' });
+    if (g.createdById !== me) return res.status(403).json({ error: 'FORBIDDEN' });
+
+    await prisma.groupMembership.deleteMany({ where: { groupId: id } });
+    const deletedGroup = await prisma.group.delete({ where: { id } });
+
+    res.json({ ok: true, data: deletedGroup });
+  } catch (err) {
+    console.error('delete group error:', err);
+    res.status(500).json({ error: 'SERVER_ERROR' });
   }
 });
 

@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.example.outings_app",
+      "sha256_cert_fingerprints": [
+        "2C:83:AF:CD:5B:54:E9:3E:CB:56:75:B8:69:66:51:CD:1C:1E:D0:89:55:5E:BA:53:87:E5:B7:5B:16:02:4C:30"
+      ]
+    }
+  }
+]

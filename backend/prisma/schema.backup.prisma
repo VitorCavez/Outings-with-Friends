@@ -3,9 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider          = "postgresql"
-  url               = env("DATABASE_URL")
-  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -338,22 +337,24 @@ model CalendarEntry {
 }
 
 model Message {
-  id          String      @id @default(uuid())
+  id          String       @id @default(uuid())
   text        String
   senderId    String
   groupId     String?
   recipientId String?
-  isRead      Boolean     @default(false)
-  createdAt   DateTime    @default(now())
+  isRead      Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+
+  /// NEW fields for richer messaging
+  messageType MessageType  @default(text)
+  mediaUrl    String?
   fileName    String?
   fileSize    Int?
-  mediaUrl    String?
-  /// NEW fields for richer messaging
-  messageType MessageType @default(text)
   readAt      DateTime?
-  group       Group?      @relation(fields: [groupId], references: [id])
-  recipient   User?       @relation("DirectMessages", fields: [recipientId], references: [id])
-  sender      User        @relation("Message_sender", fields: [senderId], references: [id])
+
+  group       Group?       @relation(fields: [groupId], references: [id])
+  recipient   User?        @relation("DirectMessages", fields: [recipientId], references: [id])
+  sender      User         @relation("Message_sender", fields: [senderId], references: [id])
 
   @@index([groupId])
   @@index([recipientId])

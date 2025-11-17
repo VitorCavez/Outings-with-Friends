@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Open in Outings</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+  </head>
+  <body>
+    <h1>Opening Outing…</h1>
+    <p>If nothing happens, <a id="open">tap here</a> or install the app.</p>
+    <script>
+      // Matches /plan/outings/<id>
+      const m = location.pathname.match(/\/plan\/outings\/([^\/?#]+)/);
+      const id = m && m[1] ? m[1] : null;
+      // For Android App Links, the browser will hand off automatically if app is installed.
+      // The link below lets the user try again if needed.
+      const deepLink = id ? `${location.origin}/plan/outings/${id}` : location.origin;
+      document.getElementById('open').href = deepLink;
+    </script>
+  </body>
+</html>
