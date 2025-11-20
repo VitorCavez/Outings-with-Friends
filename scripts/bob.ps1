@@ -1,4 +1,4 @@
-if (-not $env:API_BASE_URL) { $env:API_BASE_URL = "http://localhost:4000" }
+if (-not $env:API_BASE_URL) { $env:API_BASE_URL = "https://outings-with-friends-api.onrender.com" }
 
 $email = $env:BOB_EMAIL
 if (-not $email -and (Test-Path -Path ".\backend\.env.local")) {
