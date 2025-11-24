@@ -9,10 +9,38 @@ const path = require('path');
 // reuse the seeder
 const { runSeed } = require(path.join(__dirname, '..', '..', 'prisma', 'seed.js'));
 
-// very light guard: only enabled in non-production
+// below other requires
+const bcrypt = require('bcryptjs');
+
+// add this inside the dev router file
+router.post('/set-password', async (req, res) => {
+  // safety: only allow when explicitly enabled
+  if (process.env.ENABLE_DEV_ROUTES !== 'true') {
+    return res.status(403).json({ error: 'DEV_ROUTES_DISABLED' });
+  }
+  const { email, password } = req.body || {};
+  if (!email || !password) return res.status(400).json({ error: 'email and password required' });
+
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    await prisma.user.update({ where: { email }, data: { passwordHash: hash } });
+    res.json({ ok: true });
+  } catch (e) {
+    // if user not found, create it:
+    if (e.code === 'P2025') {
+      const hash = await bcrypt.hash(password, 10);
+      await prisma.user.create({ data: { email, passwordHash: hash } });
+      return res.json({ ok: true, created: true });
+    }
+    console.error(e);
+    res.status(500).json({ error: 'SET_PASSWORD_FAILED' });
+  }
+});
+
 function ensureDevEnabled(req, res, next) {
-  if (process.env.NODE_ENV === 'production') {
-    return res.status(403).json({ ok: false, error: 'DISABLED_IN_PRODUCTION' });
+  // Only allow when you explicitly flip the switch
+  if (process.env.ENABLE_DEV_ROUTES !== 'true') {
+    return res.status(403).json({ ok: false, error: 'DEV_ROUTES_DISABLED' });
   }
   next();
 }
