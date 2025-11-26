@@ -85,12 +85,16 @@ app.use('/api', apiLimiter);
 // DEV helpers:
 // - In non-production: mounted at /dev
 // - In production: only if ENABLE_DEV_ROUTES=true, mounted at /api/dev
+// DEV helpers (mount /api/dev in prod only if ENABLE_DEV_ROUTES=true)
 {
   const enableFlag = process.env.ENABLE_DEV_ROUTES === 'true';
   if (process.env.NODE_ENV !== 'production' || enableFlag) {
     const devRoutes = require('./routes/devRoutes');
     const mountPath = enableFlag ? '/api/dev' : '/dev';
+    console.log(`[devRoutes] enableFlag=${enableFlag} NODE_ENV=${process.env.NODE_ENV} mountPath=${mountPath}`);
     app.use(mountPath, express.json(), devRoutes);
+  } else {
+    console.log('[devRoutes] disabled in production');
   }
 }
 
