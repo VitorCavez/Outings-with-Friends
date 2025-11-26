@@ -82,10 +82,16 @@ app.use('/api', apiLimiter);
 
 /* ---------------- Routes -------------------------------- */
 
-// DEV helpers (only when not production)
-if (process.env.NODE_ENV !== 'production') {
-  const devRoutes = require('./routes/devRoutes');
-  app.use('/dev', express.json(), devRoutes);
+// DEV helpers:
+// - In non-production: mounted at /dev
+// - In production: only if ENABLE_DEV_ROUTES=true, mounted at /api/dev
+{
+  const enableFlag = process.env.ENABLE_DEV_ROUTES === 'true';
+  if (process.env.NODE_ENV !== 'production' || enableFlag) {
+    const devRoutes = require('./routes/devRoutes');
+    const mountPath = enableFlag ? '/api/dev' : '/dev';
+    app.use(mountPath, express.json(), devRoutes);
+  }
 }
 
 // Users

@@ -38,9 +38,9 @@ router.post('/set-password', async (req, res) => {
 });
 
 function ensureDevEnabled(req, res, next) {
-  // Only allow when you explicitly flip the switch
-  if (process.env.ENABLE_DEV_ROUTES !== 'true') {
-    return res.status(403).json({ ok: false, error: 'DEV_ROUTES_DISABLED' });
+  const enabled = process.env.NODE_ENV !== 'production' || process.env.ENABLE_DEV_ROUTES === 'true';
+  if (!enabled) {
+    return res.status(403).json({ ok: false, error: 'DISABLED' });
   }
   next();
 }
