@@ -116,15 +116,16 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
-    if (_locationName == null || _lat == null || _lng == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Please select a location from the list or add a custom place.',
-          ),
-        ),
-      );
-      return;
+    // Ensure we always send some non-empty locationName to the backend.
+    // If the autocomplete didn't fire, we fall back to the address or a generic label.
+    String locationName = (_locationName ?? '').trim();
+    if (locationName.isEmpty) {
+      final addr = _addressCtrl.text.trim();
+      if (addr.isNotEmpty) {
+        locationName = addr;
+      } else {
+        locationName = 'Custom place';
+      }
     }
 
     final title = _titleCtrl.text.trim();
@@ -152,7 +153,7 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
       "title": title,
       "description": description,
       "outingType": _outingType,
-      "locationName": _locationName,
+      "locationName": locationName,
       "latitude": _lat,
       "longitude": _lng,
       "address": address,
@@ -241,8 +242,7 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
 
             // Outing type
             DropdownButtonFormField<String>(
-              initialValue:
-                  _outingType, // <- use initialValue (value is deprecated here)
+              initialValue: _outingType,
               items: _types
                   .map((t) => DropdownMenuItem(value: t, child: Text(t)))
                   .toList(),
@@ -355,8 +355,9 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
                 validator: (v) {
                   if (!_piggyBankEnabled) return null;
                   final cents = _eurosToCents(v ?? '');
-                  if (cents == null || cents <= 0)
+                  if (cents == null || cents <= 0) {
                     return 'Enter a valid amount';
+                  }
                   return null;
                 },
               ),

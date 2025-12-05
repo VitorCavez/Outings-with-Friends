@@ -152,53 +152,92 @@ router.post('/', requireAuth, async (req,res)=>{
     isPublic=false,
   } = req.body;
 
-  if(!title || !outingType || !locationName){
-    return res.status(400).json({ error:'MISSING_FIELDS', details:'title, outingType, locationName are required' });
+  // 👉 Only title + outingType are *hard required*.
+  if(!title || !outingType){
+    return res.status(400).json({
+      error:'MISSING_FIELDS',
+      details:'title and outingType are required',
+    });
   }
-  const lat=toFloatOrNull(latitude), lng=toFloatOrNull(longitude);
-  if(lat==null || lng==null) return res.status(400).json({ error:'INVALID_COORDS', details:'latitude and longitude must be numbers' });
+
+  // 🌍 Coordinates are OPTIONAL now.
+  const lat = toFloatOrNull(latitude);
+  const lng = toFloatOrNull(longitude);
 
   const start=toDateIfString(dateTimeStart), end=toDateIfString(dateTimeEnd);
-  if(!start || !end || !(end>start)) return res.status(400).json({ error:'INVALID_DATES', details:'dateTimeStart/dateTimeEnd invalid' });
+  if(!start || !end || !(end>start)) {
+    return res.status(400).json({
+      error:'INVALID_DATES',
+      details:'dateTimeStart/dateTimeEnd invalid',
+    });
+  }
 
   const budgetMinNum=toFloatOrNull(budgetMin);
   const budgetMaxNum=toFloatOrNull(budgetMax);
 
-  const targetCents = toIntOrNull(piggyBankTargetCents) ?? centsFromFloat(piggyBankTarget);
+  const targetCents =
+    toIntOrNull(piggyBankTargetCents) ?? centsFromFloat(piggyBankTarget);
   if(piggyBankEnabled===true && (!targetCents || targetCents<=0)){
-    return res.status(400).json({ error:'INVALID_PB_TARGET', details:'piggyBankTargetCents must be positive' });
+    return res.status(400).json({
+      error:'INVALID_PB_TARGET',
+      details:'piggyBankTargetCents must be positive',
+    });
   }
 
   try{
-    const userExists=await prisma.user.findUnique({ where:{ id:userId }, select:{ id:true }});
-    if(!userExists) return res.status(400).json({ error:'INVALID_USER' });
+    const userExists=await prisma.user.findUnique({
+      where:{ id:userId },
+      select:{ id:true },
+    });
+    if(!userExists) {
+      return res.status(400).json({ error:'INVALID_USER' });
+    }
 
     let groupConnect=undefined;
     if(groupId){
-      const g=await prisma.group.findUnique({ where:{ id:groupId }, select:{ id:true }});
+      const g=await prisma.group.findUnique({
+        where:{ id:groupId },
+        select:{ id:true },
+      });
       if(!g) return res.status(400).json({ error:'INVALID_GROUP' });
       groupConnect=groupId;
     }
 
     const outing=await prisma.outing.create({
       data:{
-        title, outingType, createdById:userId, groupId:groupConnect ?? null,
-        locationName, latitude:lat, longitude:lng, address:address ?? null,
-        dateTimeStart:start, dateTimeEnd:end, description:description ?? null,
-        budgetMin:budgetMinNum, budgetMax:budgetMaxNum,
-        piggyBankEnabled:!!piggyBankEnabled,
-        piggyBankTarget: piggyBankTarget ?? (targetCents!=null ? targetCents/100 : null),
+        title,
+        outingType,
+        createdById:userId,
+        groupId:groupConnect ?? null,
+        locationName: locationName ?? null,
+        latitude: lat,
+        longitude: lng,
+        address: address ?? null,
+        dateTimeStart:start,
+        dateTimeEnd:end,
+        description: description ?? null,
+        budgetMin: budgetMinNum,
+        budgetMax: budgetMaxNum,
+        piggyBankEnabled: !!piggyBankEnabled,
+        piggyBankTarget:
+          piggyBankTarget ?? (targetCents!=null ? targetCents/100 : null),
         piggyBankTargetCents: targetCents ?? null,
-        checklist: Array.isArray(checklist)?checklist:[],
-        suggestedItinerary, liveLocationEnabled:!!liveLocationEnabled,
-        isPublic:!!isPublic,
+        checklist: Array.isArray(checklist) ? checklist : [],
+        suggestedItinerary,
+        liveLocationEnabled: !!liveLocationEnabled,
+        isPublic: !!isPublic,
       }
     });
 
     res.status(201).json({ message:'Outing created successfully', outing });
   }catch(e){
     console.error('Create outing error:',e);
-    if(e?.code==='P2003') return res.status(400).json({ error:'FK_CONSTRAINT', details:e.meta||'Foreign key constraint failed' });
+    if(e?.code==='P2003') {
+      return res.status(400).json({
+        error:'FK_CONSTRAINT',
+        details:e.meta||'Foreign key constraint failed',
+      });
+    }
     res.status(500).json({ error:'Internal server error' });
   }
 });

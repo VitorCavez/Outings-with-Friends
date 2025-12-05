@@ -16,8 +16,11 @@ class ApiClient {
     try {
       final t = tokenProvider?.call();
       if (t != null && t.isNotEmpty) return t;
-    } catch (_) {}
-    return (authToken != null && authToken!.isNotEmpty) ? authToken : null;
+    } catch (_) {
+      // ignore
+    }
+    if (authToken != null && authToken!.isNotEmpty) return authToken;
+    return null;
   }
 
   Map<String, String> _headers({Map<String, String>? extra}) {
@@ -25,9 +28,22 @@ class ApiClient {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
     };
+
     final t = _currentToken();
-    if (t != null) h['Authorization'] = 'Bearer $t';
+
+    if (t != null && t.isNotEmpty) {
+      h['Authorization'] = 'Bearer $t';
+    }
+
     if (extra != null) h.addAll(extra);
+
+    // DEBUG
+    // ignore: avoid_print
+    print(
+      '🧪 ApiClient headers → hasAuth=${h.containsKey('Authorization')} '
+      'len=${t?.length ?? 0}',
+    );
+
     return h;
   }
 
@@ -74,7 +90,9 @@ class ApiClient {
   }) async {
     final req = http.MultipartRequest('POST', _u(path, query));
     final t = _currentToken();
-    if (t != null) req.headers['Authorization'] = 'Bearer $t';
+    if (t != null && t.isNotEmpty) {
+      req.headers['Authorization'] = 'Bearer $t';
+    }
 
     fields.forEach((k, v) => req.fields.putIfAbsent(k, () => v));
 

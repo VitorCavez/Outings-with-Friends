@@ -1,3 +1,4 @@
+// lib/features/plan/plan_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -13,17 +14,20 @@ import 'package:outings_app/features/contacts/widgets/contact_multi_select_dialo
 import 'package:outings_app/features/contacts/display_name.dart';
 
 ApiClient _apiFromContext(BuildContext context) {
+  final auth = context.read<AuthProvider?>();
+
+  final String initialToken = (auth?.authToken ?? auth?.token ?? '').trim();
+  debugPrint(
+    '🔑 PlanScreen _apiFromContext initial token length = ${initialToken.length}',
+  );
+
   return ApiClient(
     baseUrl: AppConfig.apiBaseUrl,
+    authToken: initialToken,
     tokenProvider: () {
-      try {
-        final auth = context.read<AuthProvider>();
-        final dyn = auth as dynamic;
-        final t = (dyn.authToken ?? dyn.token) as String?;
-        return t ?? '';
-      } catch (_) {
-        return '';
-      }
+      final t = (auth?.authToken ?? auth?.token ?? '').trim();
+      debugPrint('🔁 ApiClient tokenProvider length = ${t.length}');
+      return t;
     },
   );
 }
@@ -67,11 +71,28 @@ class _PlanScreenState extends State<PlanScreen> {
   String? _errorInvites;
   String? _errorSent;
 
+  bool _initialFetchStarted = false;
+
   @override
   void initState() {
     super.initState();
     _svc = OutingShareService(_apiFromContext(context));
-    _refreshAll();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final auth = context.watch<AuthProvider>();
+    final token = (auth.authToken ?? auth.token ?? '').trim();
+
+    debugPrint(
+      '📡 Plan.didChangeDependencies isLoggedIn=${auth.isLoggedIn} tokenLen=${token.length} initialFetchStarted=$_initialFetchStarted',
+    );
+
+    if (!_initialFetchStarted && auth.isLoggedIn && token.isNotEmpty) {
+      _initialFetchStarted = true;
+      _refreshAll();
+    }
   }
 
   Future<void> _refreshAll() async {
@@ -413,6 +434,18 @@ class _PlanScreenState extends State<PlanScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
+    final isLoggedIn = auth.isLoggedIn;
+    final tokenLen = (auth.authToken ?? auth.token ?? '').trim().length;
+
+    debugPrint(
+      '📺 PlanScreen build: isLoggedIn=$isLoggedIn tokenLen=$tokenLen',
+    );
+
+    if (!isLoggedIn) {
+      return const Center(child: Text('Please log in to see your outings.'));
+    }
+
     return DefaultTabController(
       length: 4,
       child: Scaffold(
@@ -430,7 +463,7 @@ class _PlanScreenState extends State<PlanScreen> {
             IconButton(
               tooltip: 'My Outings',
               icon: const Icon(Icons.list_alt),
-              onPressed: () => context.go('/my-outings'),
+              onPressed: () => context.push('/my-outings'),
             ),
           ],
           bottom: const TabBar(
@@ -530,8 +563,9 @@ class _PlanScreenState extends State<PlanScreen> {
     if (_errorShared != null) {
       return _ErrorState(message: _errorShared!, onRetry: _loadShared);
     }
-    if (_shared.isEmpty)
+    if (_shared.isEmpty) {
       return const _Empty(text: 'Nothing shared with you yet.');
+    }
 
     final cs = Theme.of(context).colorScheme;
 
@@ -579,12 +613,15 @@ class _PlanScreenState extends State<PlanScreen> {
   Widget _buildInvites() {
     final resolver = DisplayNameResolver.of(context);
 
-    if (_loadingInvites)
+    if (_loadingInvites) {
       return const Center(child: CircularProgressIndicator());
+    }
     if (_errorInvites != null) {
       return _ErrorState(message: _errorInvites!, onRetry: _loadInvites);
     }
-    if (_invites.isEmpty) return const _Empty(text: 'No pending invites.');
+    if (_invites.isEmpty) {
+      return const _Empty(text: 'No pending invites.');
+    }
 
     return RefreshIndicator(
       onRefresh: _loadInvites,
@@ -629,7 +666,6 @@ class _PlanScreenState extends State<PlanScreen> {
                   '/plan/outings/${inv.outingId}',
                 );
                 if (changed == true) {
-                  // Invitations can be invalidated by deletes; safest is to refresh all
                   await _refreshAll();
                 }
               },

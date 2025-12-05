@@ -13,7 +13,7 @@ class DiscoverService {
   DiscoverService({http.Client? client}) : _client = client ?? http.Client();
 
   /// Fetches the discover feed from your backend:
-  /// GET /discover?lat=..&lng=..&radiusKm=..&types=Food,Hike&limit=20
+  /// GET /api/discover?lat=..&lng=..&radiusKm=..&types=Food,Hike&limit=20
   ///
   /// Expected JSON shape:
   /// {
@@ -27,14 +27,22 @@ class DiscoverService {
     Duration timeout = const Duration(seconds: 12),
   }) async {
     final base = AppConfig.apiBaseUrl;
-    final uri = Uri.parse('$base/discover').replace(queryParameters: {
-      'lat': lat.toString(),
-      'lng': lng.toString(),
-      ...filters.toQuery(),
-    });
+
+    // IMPORTANT: hit the API prefix so we don't get a 404
+    final uri = Uri.parse('$base/api/discover').replace(
+      queryParameters: {
+        'lat': lat.toString(),
+        'lng': lng.toString(),
+        ...filters.toQuery(),
+      },
+    );
 
     final res = await _client
-        .get(uri, headers: {'Content-Type': 'application/json'})
+        .get(
+          uri,
+          // No need for Content-Type on GET; Accept is enough
+          headers: {'Accept': 'application/json'},
+        )
         .timeout(timeout);
 
     if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -42,11 +50,13 @@ class DiscoverService {
       if (res.body.isEmpty) {
         return DiscoverResponse(featured: const [], suggested: const []);
       }
+
       final body = res.body;
-      // try: if body unwraps directly
       try {
+        // try: if body unwraps directly
         return DiscoverResponse.fromJson(
-            jsonDecode(body) as Map<String, dynamic>);
+          jsonDecode(body) as Map<String, dynamic>,
+        );
       } catch (_) {
         // fallback: model helper
         return DiscoverResponse.fromJsonString(body);
@@ -58,9 +68,11 @@ class DiscoverService {
     try {
       final decoded = jsonDecode(res.body);
       if (decoded is Map && decoded['message'] is String) {
-        msg = decoded['message'];
+        msg = decoded['message'] as String;
       }
-    } catch (_) {}
+    } catch (_) {
+      // ignore JSON parse error
+    }
 
     throw HttpException(msg);
   }

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart'; // BuildContext
 import 'package:go_router/go_router.dart'; // <- use go_router to exit shell
 import 'package:shared_preferences/shared_preferences.dart';
+
 import 'auth_api.dart';
 
 class AuthProvider extends ChangeNotifier {
@@ -35,24 +36,44 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> login(String email, String password) async {
-    final api = AuthApi();
-    final result = await api.login(email: email, password: password);
+  Future<void> _applyAuthResult(AuthResult result) async {
     _token = result.token;
     _currentUserId = result.userId;
     debugPrint(
-      '🔐 login: tokenLen=${_token?.length ?? 0}, uid=$_currentUserId',
+      '🔐 AuthProvider.applyAuthResult: tokenLen=${_token?.length ?? 0}, uid=$_currentUserId',
     );
 
     try {
       final sp = await SharedPreferences.getInstance();
       await sp.setString(_kTokenKey, _token!);
       await sp.setString(_kUserIdKey, _currentUserId!);
+      debugPrint(
+        '💾 AuthProvider.persisted: tokenLen=${_token!.length}, uid=$_currentUserId',
+      );
     } catch (e) {
       debugPrint('⚠️ persist token error: $e');
     }
 
     notifyListeners();
+  }
+
+  /// Login using API and persist token/userId.
+  Future<void> login(String email, String password) async {
+    final api = AuthApi();
+    final result = await api.login(email: email, password: password);
+    await _applyAuthResult(result);
+  }
+
+  /// Register using API and persist token/userId (so the user is logged in
+  /// immediately after registering).
+  Future<void> register(String fullName, String email, String password) async {
+    final api = AuthApi();
+    final result = await api.register(
+      fullName: fullName,
+      email: email,
+      password: password,
+    );
+    await _applyAuthResult(result);
   }
 
   /// Clears in-memory + persisted auth state.
