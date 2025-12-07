@@ -231,7 +231,7 @@ router.post('/', requireAuth, async (req, res) => {
     description,
     budgetMin,
     budgetMax,
-    piggyBankEnabled = true,
+    piggyBankEnabled = false,
     piggyBankTarget,
     piggyBankTargetCents,
     checklist = [],
@@ -240,6 +240,7 @@ router.post('/', requireAuth, async (req, res) => {
     isPublic = false,
   } = req.body;
 
+  // Basic required fields
   if (!title || !outingType || !locationName) {
     return res.status(400).json({
       error: 'MISSING_FIELDS',
@@ -247,31 +248,40 @@ router.post('/', requireAuth, async (req, res) => {
     });
   }
 
-  // ✅ Allow either both coords or none (custom places with no map)
-  const lat = toFloatOrNull(latitude);
-  const lng = toFloatOrNull(longitude);
-  const onlyOneCoordSet = (lat == null) !== (lng == null);
-  if (onlyOneCoordSet) {
-    return res.status(400).json({
-      error: 'INVALID_COORDS',
-      details: 'Either provide both latitude and longitude, or omit both.',
-    });
+  // Coords: optional overall, but if either is provided, both must be valid numbers
+  const hasLatRaw = latitude !== undefined && latitude !== null && latitude !== '';
+  const hasLngRaw = longitude !== undefined && longitude !== null && longitude !== '';
+
+  let lat = null;
+  let lng = null;
+
+  if (hasLatRaw || hasLngRaw) {
+    lat = toFloatOrNull(latitude);
+    lng = toFloatOrNull(longitude);
+    if (lat == null || lng == null) {
+      return res.status(400).json({
+        error: 'INVALID_COORDS',
+        details: 'latitude and longitude must be numbers',
+      });
+    }
   }
 
+  // Dates
   const start = toDateIfString(dateTimeStart);
   const end = toDateIfString(dateTimeEnd);
   if (!start || !end || !(end > start)) {
-    return res.status(400).json({
-      error: 'INVALID_DATES',
-      details: 'dateTimeStart/dateTimeEnd invalid',
-    });
+    return res
+      .status(400)
+      .json({ error: 'INVALID_DATES', details: 'dateTimeStart/dateTimeEnd invalid' });
   }
 
   const budgetMinNum = toFloatOrNull(budgetMin);
   const budgetMaxNum = toFloatOrNull(budgetMax);
 
+  // Piggy bank target normalization
   const targetCents =
     toIntOrNull(piggyBankTargetCents) ?? centsFromFloat(piggyBankTarget);
+
   if (piggyBankEnabled === true && (!targetCents || targetCents <= 0)) {
     return res.status(400).json({
       error: 'INVALID_PB_TARGET',
@@ -280,52 +290,62 @@ router.post('/', requireAuth, async (req, res) => {
   }
 
   try {
+    // Ensure user exists
     const userExists = await prisma.user.findUnique({
       where: { id: userId },
       select: { id: true },
     });
-    if (!userExists) return res.status(400).json({ error: 'INVALID_USER' });
+    if (!userExists) {
+      return res.status(400).json({ error: 'INVALID_USER' });
+    }
 
-    let groupConnect = undefined;
+    // Optional group: connect by relation, NOT scalar groupId
+    let groupConnectId = null;
     if (groupId) {
       const g = await prisma.group.findUnique({
         where: { id: groupId },
         select: { id: true },
       });
-      if (!g) return res.status(400).json({ error: 'INVALID_GROUP' });
-      groupConnect = groupId;
+      if (!g) {
+        return res.status(400).json({ error: 'INVALID_GROUP' });
+      }
+      groupConnectId = g.id;
     }
 
-    const outing = await prisma.outing.create({
-      data: {
-        title,
-        outingType,
+    // Build data object
+    const data = {
+      title,
+      outingType,
+      createdBy: { connect: { id: userId } }, // relation
+      locationName,
+      latitude: lat,
+      longitude: lng,
+      address: address ?? null,
+      dateTimeStart: start,
+      dateTimeEnd: end,
+      description: description ?? null,
+      budgetMin: budgetMinNum,
+      budgetMax: budgetMaxNum,
+      piggyBankEnabled: !!piggyBankEnabled,
+      piggyBankTarget:
+        piggyBankTarget ?? (targetCents != null ? targetCents / 100 : null),
+      piggyBankTargetCents: targetCents ?? null,
+      checklist: Array.isArray(checklist) ? checklist : [],
+      suggestedItinerary,
+      liveLocationEnabled: !!liveLocationEnabled,
+      isPublic: !!isPublic,
+    };
 
-        // ✅ Prisma 6 expects the relation `createdBy`, not just createdById
-        createdBy: { connect: { id: userId } },
+    // Only include group relation if we actually have a group to connect
+    if (groupConnectId) {
+      data.group = { connect: { id: groupConnectId } };
+    }
 
-        groupId: groupConnect ?? null,
-        locationName,
-        latitude: lat ?? null,
-        longitude: lng ?? null,
-        address: address ?? null,
-        dateTimeStart: start,
-        dateTimeEnd: end,
-        description: description ?? null,
-        budgetMin: budgetMinNum,
-        budgetMax: budgetMaxNum,
-        piggyBankEnabled: !!piggyBankEnabled,
-        piggyBankTarget:
-          piggyBankTarget ?? (targetCents != null ? targetCents / 100 : null),
-        piggyBankTargetCents: targetCents ?? null,
-        checklist: Array.isArray(checklist) ? checklist : [],
-        suggestedItinerary,
-        liveLocationEnabled: !!liveLocationEnabled,
-        isPublic: !!isPublic,
-      },
-    });
+    const outing = await prisma.outing.create({ data });
 
-    res.status(201).json({ message: 'Outing created successfully', outing });
+    return res
+      .status(201)
+      .json({ message: 'Outing created successfully', outing });
   } catch (e) {
     console.error('Create outing error:', e);
     if (e?.code === 'P2003') {
@@ -335,12 +355,11 @@ router.post('/', requireAuth, async (req, res) => {
       });
     }
     if (e instanceof Prisma.PrismaClientValidationError) {
-      return res.status(400).json({
-        error: 'VALIDATION_ERROR',
-        details: e.message,
-      });
+      return res
+        .status(400)
+        .json({ error: 'VALIDATION_ERROR', details: e.message });
     }
-    res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
