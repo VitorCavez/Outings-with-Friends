@@ -180,6 +180,28 @@ async function canEditOuting(outing, viewerId) {
   return false;
 }
 
+// TEMP: debug the DB column nullability from within Render
+router.get('/dev/coords-debug', async (req, res) => {
+  try {
+    const rows = await prisma.$queryRaw`
+      SELECT
+        table_schema,
+        table_name,
+        column_name,
+        is_nullable,
+        data_type
+      FROM information_schema.columns
+      WHERE table_name = 'Outing'
+        AND column_name IN ('latitude', 'longitude')
+      ORDER BY table_schema, column_name;
+    `;
+    res.json({ ok: true, rows });
+  } catch (e) {
+    console.error('coords-debug error:', e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 /* ───────── routes (order matters) ───────── */
 
 router.get('/', optionalAuth, async (req, res) => {
