@@ -238,9 +238,9 @@ router.post('/', requireAuth, async (req, res) => {
     suggestedItinerary,
     liveLocationEnabled = false,
     isPublic = false,
-  } = req.body;
+  } = req.body || {};
 
-  // Basic required fields
+  // basic required fields
   if (!title || !outingType || !locationName) {
     return res.status(400).json({
       error: 'MISSING_FIELDS',
@@ -248,44 +248,27 @@ router.post('/', requireAuth, async (req, res) => {
     });
   }
 
-  // ----- Coordinates (optional overall, but must be numbers if provided) -----
-  const hasLatRaw =
-    latitude !== undefined && latitude !== null && latitude !== '';
-  const hasLngRaw =
-    longitude !== undefined && longitude !== null && longitude !== '';
+  // coords (optional)
+  const lat = toFloatOrNull(latitude);
+  const lng = toFloatOrNull(longitude);
 
-  let lat = null;
-  let lng = null;
-
-  if (hasLatRaw || hasLngRaw) {
-    lat = toFloatOrNull(latitude);
-    lng = toFloatOrNull(longitude);
-
-    // If one is provided but parsing fails, complain
-    if (lat == null || lng == null) {
-      return res.status(400).json({
-        error: 'INVALID_COORDS',
-        details: 'latitude and longitude must be numbers',
-      });
-    }
-  }
-
-  // ----- Dates -----
+  // dates
   const start = toDateIfString(dateTimeStart);
   const end = toDateIfString(dateTimeEnd);
   if (!start || !end || !(end > start)) {
-    return res
-      .status(400)
-      .json({ error: 'INVALID_DATES', details: 'dateTimeStart/dateTimeEnd invalid' });
+    return res.status(400).json({
+      error: 'INVALID_DATES',
+      details: 'dateTimeStart/dateTimeEnd invalid',
+    });
   }
 
+  // budgets
   const budgetMinNum = toFloatOrNull(budgetMin);
   const budgetMaxNum = toFloatOrNull(budgetMax);
 
-  // ----- Piggy Bank target -----
+  // piggy bank target
   const targetCents =
     toIntOrNull(piggyBankTargetCents) ?? centsFromFloat(piggyBankTarget);
-
   if (piggyBankEnabled === true && (!targetCents || targetCents <= 0)) {
     return res.status(400).json({
       error: 'INVALID_PB_TARGET',
@@ -294,7 +277,7 @@ router.post('/', requireAuth, async (req, res) => {
   }
 
   try {
-    // Ensure user exists
+    // ensure user exists
     const userExists = await prisma.user.findUnique({
       where: { id: userId },
       select: { id: true },
@@ -303,8 +286,8 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'INVALID_USER' });
     }
 
-    // Optional group: connect via relation
-    let groupConnectId = null;
+    // optional group connect (schema now expects `group`, not `groupId`)
+    let groupConnect = null;
     if (groupId) {
       const g = await prisma.group.findUnique({
         where: { id: groupId },
@@ -313,14 +296,13 @@ router.post('/', requireAuth, async (req, res) => {
       if (!g) {
         return res.status(400).json({ error: 'INVALID_GROUP' });
       }
-      groupConnectId = g.id;
+      groupConnect = g.id;
     }
 
-    // ----- Build data object -----
+    // base data object
     const data = {
       title,
       outingType,
-      createdBy: { connect: { id: userId } },
       locationName,
       address: address ?? null,
       dateTimeStart: start,
@@ -336,17 +318,24 @@ router.post('/', requireAuth, async (req, res) => {
       suggestedItinerary,
       liveLocationEnabled: !!liveLocationEnabled,
       isPublic: !!isPublic,
+
+      // relations
+      createdBy: {
+        connect: { id: userId },
+      },
+      ...(groupConnect
+        ? {
+            group: {
+              connect: { id: groupConnect },
+            },
+          }
+        : {}),
     };
 
-    // Only include coords if we have valid numbers
+    // only send coords if we actually have numbers
     if (lat != null && lng != null) {
       data.latitude = lat;
       data.longitude = lng;
-    }
-
-    // Only include group relation if present
-    if (groupConnectId) {
-      data.group = { connect: { id: groupConnectId } };
     }
 
     const outing = await prisma.outing.create({ data });
@@ -356,16 +345,11 @@ router.post('/', requireAuth, async (req, res) => {
       .json({ message: 'Outing created successfully', outing });
   } catch (e) {
     console.error('Create outing error:', e);
-    if (e?.code === 'P2003') {
+    if (e.code === 'P2003') {
       return res.status(400).json({
         error: 'FK_CONSTRAINT',
         details: e.meta || 'Foreign key constraint failed',
       });
-    }
-    if (e instanceof Prisma.PrismaClientValidationError) {
-      return res
-        .status(400)
-        .json({ error: 'VALIDATION_ERROR', details: e.message });
     }
     return res.status(500).json({ error: 'Internal server error' });
   }
