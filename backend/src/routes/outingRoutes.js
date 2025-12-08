@@ -248,9 +248,11 @@ router.post('/', requireAuth, async (req, res) => {
     });
   }
 
-  // Coords: optional overall, but if either is provided, both must be valid numbers
-  const hasLatRaw = latitude !== undefined && latitude !== null && latitude !== '';
-  const hasLngRaw = longitude !== undefined && longitude !== null && longitude !== '';
+  // ----- Coordinates (optional overall, but must be numbers if provided) -----
+  const hasLatRaw =
+    latitude !== undefined && latitude !== null && latitude !== '';
+  const hasLngRaw =
+    longitude !== undefined && longitude !== null && longitude !== '';
 
   let lat = null;
   let lng = null;
@@ -258,6 +260,8 @@ router.post('/', requireAuth, async (req, res) => {
   if (hasLatRaw || hasLngRaw) {
     lat = toFloatOrNull(latitude);
     lng = toFloatOrNull(longitude);
+
+    // If one is provided but parsing fails, complain
     if (lat == null || lng == null) {
       return res.status(400).json({
         error: 'INVALID_COORDS',
@@ -266,7 +270,7 @@ router.post('/', requireAuth, async (req, res) => {
     }
   }
 
-  // Dates
+  // ----- Dates -----
   const start = toDateIfString(dateTimeStart);
   const end = toDateIfString(dateTimeEnd);
   if (!start || !end || !(end > start)) {
@@ -278,7 +282,7 @@ router.post('/', requireAuth, async (req, res) => {
   const budgetMinNum = toFloatOrNull(budgetMin);
   const budgetMaxNum = toFloatOrNull(budgetMax);
 
-  // Piggy bank target normalization
+  // ----- Piggy Bank target -----
   const targetCents =
     toIntOrNull(piggyBankTargetCents) ?? centsFromFloat(piggyBankTarget);
 
@@ -299,7 +303,7 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'INVALID_USER' });
     }
 
-    // Optional group: connect by relation, NOT scalar groupId
+    // Optional group: connect via relation
     let groupConnectId = null;
     if (groupId) {
       const g = await prisma.group.findUnique({
@@ -312,14 +316,12 @@ router.post('/', requireAuth, async (req, res) => {
       groupConnectId = g.id;
     }
 
-    // Build data object
+    // ----- Build data object -----
     const data = {
       title,
       outingType,
-      createdBy: { connect: { id: userId } }, // relation
+      createdBy: { connect: { id: userId } },
       locationName,
-      latitude: lat,
-      longitude: lng,
       address: address ?? null,
       dateTimeStart: start,
       dateTimeEnd: end,
@@ -336,7 +338,13 @@ router.post('/', requireAuth, async (req, res) => {
       isPublic: !!isPublic,
     };
 
-    // Only include group relation if we actually have a group to connect
+    // Only include coords if we have valid numbers
+    if (lat != null && lng != null) {
+      data.latitude = lat;
+      data.longitude = lng;
+    }
+
+    // Only include group relation if present
     if (groupConnectId) {
       data.group = { connect: { id: groupConnectId } };
     }

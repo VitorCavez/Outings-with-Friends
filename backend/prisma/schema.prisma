@@ -162,8 +162,8 @@ model Outing {
   createdById           String
   groupId               String?
   locationName          String
-  latitude              Float
-  longitude             Float
+  latitude              Float?
+  longitude             Float?
   address               String?
   dateTimeStart         DateTime
   dateTimeEnd           DateTime
