@@ -202,6 +202,22 @@ router.get('/dev/coords-debug', async (req, res) => {
   }
 });
 
+// TEMP: one-off fixer to drop NOT NULL on coords in the actual DB Render uses
+router.get('/dev/fix-coords-nullable', async (req, res) => {
+  try {
+    const r1 = await prisma.$executeRaw`
+      ALTER TABLE "Outing" ALTER COLUMN "latitude" DROP NOT NULL
+    `;
+    const r2 = await prisma.$executeRaw`
+      ALTER TABLE "Outing" ALTER COLUMN "longitude" DROP NOT NULL
+    `;
+    res.json({ ok: true, results: { r1, r2 } });
+  } catch (e) {
+    console.error('fix-coords-nullable error:', e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 /* ───────── routes (order matters) ───────── */
 
 router.get('/', optionalAuth, async (req, res) => {
