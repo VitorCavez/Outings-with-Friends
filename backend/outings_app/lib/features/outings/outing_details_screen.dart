@@ -933,6 +933,8 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
 
         final pb = snap.data!;
         final pct = pb.progressPct.clamp(0, 100);
+        final currentUserId = context.read<AuthProvider?>()?.currentUserId;
+
         return Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -1005,11 +1007,23 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                                 .split('.')
                                 .first ??
                             '';
+
+                        final isMine =
+                            (currentUserId != null &&
+                            c.userId == currentUserId);
+
                         return ListTile(
                           dense: true,
                           leading: const Icon(Icons.account_circle),
                           title: Text('€$euros'),
                           subtitle: Text(c.note ?? when),
+                          trailing: isMine
+                              ? IconButton(
+                                  tooltip: 'Delete contribution',
+                                  icon: const Icon(Icons.delete_outline),
+                                  onPressed: () => _deleteContribution(c),
+                                )
+                              : null,
                         );
                       }).toList(),
                     ),
@@ -1020,6 +1034,57 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
         );
       },
     );
+  }
+
+  Future<void> _deleteContribution(Contribution c) async {
+    final cs = Theme.of(context).colorScheme;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete contribution?'),
+        content: const Text(
+          'This will remove your contribution from the Piggy Bank.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: cs.error),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final ok = await _svc.deleteContribution(
+        outingId: widget.outingId,
+        contributionId: c.id,
+      );
+      if (!mounted) return;
+
+      if (ok) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Contribution deleted')));
+        setState(() => _pbReloadNonce++); // reload Piggy Bank card
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Delete failed')));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete error: $e')));
+    }
   }
 
   // -----------------------------

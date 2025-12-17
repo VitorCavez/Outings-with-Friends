@@ -583,7 +583,7 @@ router.post('/:id/invites', requireAuth, async (req, res) => {
         where: { phoneE164: value },
         select: { id: true },
       });
-        return u ? u.id : null;
+      return u ? u.id : null;
     }
 
     const created = [];
@@ -994,6 +994,53 @@ router.post('/:id/piggybank/contributions', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+/* NEW: delete a piggy bank contribution */
+router.delete(
+  '/:id/piggybank/contributions/:contributionId',
+  requireAuth,
+  async (req, res) => {
+    const { id, contributionId } = req.params;
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ error: 'AUTH_REQUIRED' });
+
+    try {
+      const contrib = await prisma.outingContribution.findUnique({
+        where: { id: contributionId },
+      });
+
+      if (!contrib || contrib.outingId !== id) {
+        return res
+          .status(404)
+          .json({ error: 'CONTRIBUTION_NOT_FOUND' });
+      }
+
+      const outing = await prisma.outing.findUnique({
+        where: { id },
+        select: { createdById: true },
+      });
+
+      if (!outing) {
+        return res.status(404).json({ error: 'Outing not found' });
+      }
+
+      const isOwner = contrib.userId === userId;
+      const isOrganizer = outing.createdById === userId;
+
+      if (!isOwner && !isOrganizer) {
+        return res
+          .status(403)
+          .json({ error: 'Only the contributor or organizer can delete.' });
+      }
+
+      await prisma.outingContribution.delete({ where: { id: contributionId } });
+      return res.json({ ok: true });
+    } catch (e) {
+      console.error('Delete contribution error:', e);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+);
 
 router.post('/:id/expenses', requireAuth, async (req, res) => {
   const { id } = req.params;

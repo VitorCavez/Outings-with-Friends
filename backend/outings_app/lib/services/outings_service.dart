@@ -90,6 +90,25 @@ class OutingsService {
     throw Exception('POST $uri failed (${res.statusCode}) ${res.body}');
   }
 
+  /// Delete a Piggy Bank contribution for an outing.
+  /// Returns true on success, throws on non-2xx errors.
+  Future<bool> deleteContribution({
+    required String outingId,
+    required String contributionId,
+  }) async {
+    final uri =
+        '/api/outings/$outingId/piggybank/contributions/$contributionId';
+    final res = await api.delete(uri).timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200 || res.statusCode == 204) {
+      return true;
+    }
+    if (res.statusCode == 401) {
+      throw Exception('DELETE $uri unauthorized (401) ${res.body}');
+    }
+    throw Exception('DELETE $uri failed (${res.statusCode}) ${res.body}');
+  }
+
   // ---- Expenses -------------------------------------------------------
   Future<ExpenseSummary> getExpenseSummary(String outingId) async {
     final uri = '/api/outings/$outingId/expenses/summary';
