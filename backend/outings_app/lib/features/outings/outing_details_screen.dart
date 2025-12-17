@@ -457,73 +457,80 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
     final cs = Theme.of(context).colorScheme;
     final ctl = TextEditingController();
 
-    await showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Invite people'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Enter emails or phone numbers (comma-separated).',
-              style: TextStyle(color: cs.onSurfaceVariant),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: ctl,
-              decoration: const InputDecoration(
-                hintText: 'friend@example.com, +3538XXXXXXX',
+    try {
+      await showDialog<bool>(
+        context: context,
+        builder: (dialogCtx) => AlertDialog(
+          title: const Text('Invite people'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Enter emails or phone numbers (comma-separated).',
+                style: TextStyle(color: cs.onSurfaceVariant),
               ),
-              minLines: 1,
-              maxLines: 4,
+              const SizedBox(height: 8),
+              TextField(
+                controller: ctl,
+                decoration: const InputDecoration(
+                  hintText: 'friend@example.com, +3538XXXXXXX',
+                ),
+                minLines: 1,
+                maxLines: 4,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final raw = ctl.text.trim();
+                if (raw.isEmpty) {
+                  Navigator.of(dialogCtx).pop(false);
+                  return;
+                }
+                final contacts = raw
+                    .split(',')
+                    .map((s) => s.trim())
+                    .where((s) => s.isNotEmpty)
+                    .toList();
+                try {
+                  final resp = await _api.postJson(
+                    '/api/outings/${widget.outingId}/invites',
+                    {
+                      'contacts': contacts,
+                      'role': _ParticipantRole.PARTICIPANT,
+                    },
+                  );
+                  if (resp.statusCode == 201 || resp.statusCode == 200) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(dialogCtx).showSnackBar(
+                        const SnackBar(content: Text('Invites sent')),
+                      );
+                    }
+                    setState(() => _changed = true);
+                    if (mounted) Navigator.of(dialogCtx).pop(true);
+                  } else {
+                    throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
+                  }
+                } catch (e) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(
+                    dialogCtx,
+                  ).showSnackBar(SnackBar(content: Text('Invite failed: $e')));
+                }
+              },
+              child: const Text('Send'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).maybePop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              final raw = ctl.text.trim();
-              if (raw.isEmpty) {
-                Navigator.of(context).maybePop();
-                return;
-              }
-              final contacts = raw
-                  .split(',')
-                  .map((s) => s.trim())
-                  .where((s) => s.isNotEmpty)
-                  .toList();
-              try {
-                final resp = await _api.postJson(
-                  '/api/outings/${widget.outingId}/invites',
-                  {'contacts': contacts, 'role': _ParticipantRole.PARTICIPANT},
-                );
-                if (resp.statusCode == 201 || resp.statusCode == 200) {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Invites sent')),
-                    );
-                  }
-                  setState(() => _changed = true); // reflect on parent tabs
-                  if (mounted) Navigator.of(context).maybePop();
-                } else {
-                  throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
-                }
-              } catch (e) {
-                if (!mounted) return;
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(SnackBar(content: Text('Invite failed: $e')));
-              }
-            },
-            child: const Text('Send'),
-          ),
-        ],
-      ),
-    );
+      );
+    } finally {
+      ctl.dispose();
+    }
   }
 
   // -----------------------------
@@ -1906,32 +1913,6 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                             ),
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            TextButton.icon(
-                              onPressed: _reloadingItinerary
-                                  ? null
-                                  : () {
-                                      setState(
-                                        () => _reloadingItinerary = true,
-                                      );
-                                      Future.delayed(
-                                        const Duration(milliseconds: 50),
-                                        () {
-                                          if (mounted) {
-                                            setState(
-                                              () => _reloadingItinerary = false,
-                                            );
-                                          }
-                                        },
-                                      );
-                                    },
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('Refresh itinerary'),
-                            ),
-                          ],
-                        ),
                         ItineraryTimeline(
                           key: ValueKey(
                             'itin-${widget.outingId}-${_reloadingItinerary ? 'r' : 'n'}',
@@ -2189,38 +2170,59 @@ class _VisibilityPicker extends StatelessWidget {
       _OutingVisibility.GROUPS: 'Groups',
     };
 
+    final cs = Theme.of(context).colorScheme;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: SegmentedButton<String>(
-            segments: [
-              ButtonSegment(
-                value: _OutingVisibility.PUBLIC,
-                label: Text(labels[_OutingVisibility.PUBLIC]!),
-                icon: const Icon(Icons.public),
+        // ✅ This keeps the segmented control fully on-screen on small devices.
+        LayoutBuilder(
+          builder: (ctx, constraints) {
+            return ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: SegmentedButton<String>(
+                  segments: [
+                    ButtonSegment(
+                      value: _OutingVisibility.PUBLIC,
+                      label: Text(labels[_OutingVisibility.PUBLIC]!),
+                      icon: const Icon(Icons.public),
+                    ),
+                    ButtonSegment(
+                      value: _OutingVisibility.CONTACTS,
+                      label: Text(labels[_OutingVisibility.CONTACTS]!),
+                      icon: const Icon(Icons.people_alt_outlined),
+                    ),
+                    ButtonSegment(
+                      value: _OutingVisibility.INVITED,
+                      label: Text(labels[_OutingVisibility.INVITED]!),
+                      icon: const Icon(Icons.mail_outline),
+                    ),
+                    ButtonSegment(
+                      value: _OutingVisibility.GROUPS,
+                      label: Text(labels[_OutingVisibility.GROUPS]!),
+                      icon: const Icon(Icons.group_work_outlined),
+                    ),
+                  ],
+                  selected: {value},
+                  onSelectionChanged: (s) => onChanged(s.first),
+                  style: ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                    padding: WidgetStateProperty.all(
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    ),
+                    textStyle: WidgetStateProperty.all(
+                      Theme.of(
+                        context,
+                      ).textTheme.labelMedium?.copyWith(color: cs.onSurface),
+                    ),
+                  ),
+                ),
               ),
-              ButtonSegment(
-                value: _OutingVisibility.CONTACTS,
-                label: Text(labels[_OutingVisibility.CONTACTS]!),
-                icon: const Icon(Icons.people_alt_outlined),
-              ),
-              ButtonSegment(
-                value: _OutingVisibility.INVITED,
-                label: Text(labels[_OutingVisibility.INVITED]!),
-                icon: const Icon(Icons.mail_outline),
-              ),
-              ButtonSegment(
-                value: _OutingVisibility.GROUPS,
-                label: Text(labels[_OutingVisibility.GROUPS]!),
-                icon: const Icon(Icons.group_work_outlined),
-              ),
-            ],
-            selected: {value},
-            onSelectionChanged: (s) => onChanged(s.first),
-          ),
+            );
+          },
         ),
         const SizedBox(height: 8),
         Text(

@@ -1,5 +1,6 @@
 // lib/features/outings/widgets/outing_image_uploader.dart
 import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -7,7 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../../models/outing_image.dart';
 import '../../../services/api_client.dart';
 import '../../../services/images_service.dart';
-import 'unsplash_picker_sheet.dart'; // ✅ NEW
+import 'unsplash_picker_sheet.dart';
 
 class OutingImageUploader extends StatefulWidget {
   const OutingImageUploader({
@@ -191,6 +192,7 @@ class _OutingImageUploaderState extends State<OutingImageUploader> {
               ListTile(
                 leading: Icon(Icons.delete_outline, color: scheme.error),
                 title: const Text('Delete photo'),
+                subtitle: const Text('This removes the photo from the outing.'),
                 onTap: () => Navigator.pop(ctx, true),
               ),
               const Divider(),
@@ -211,6 +213,7 @@ class _OutingImageUploaderState extends State<OutingImageUploader> {
     try {
       final ok = await _imagesSvc.deleteImage(img.id);
       if (!mounted) return;
+
       if (ok) {
         setState(() => _images.removeWhere((e) => e.id == img.id));
         ScaffoldMessenger.of(
@@ -241,6 +244,7 @@ class _OutingImageUploaderState extends State<OutingImageUploader> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Buttons row
         Wrap(
           spacing: 12,
           crossAxisAlignment: WrapCrossAlignment.center,
@@ -305,12 +309,35 @@ class _OutingImageUploaderState extends State<OutingImageUploader> {
                         ),
                       ),
                     ),
+
+                    // Top-right delete icon (more discoverable than long-press)
+                    if (!deleting)
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: Material(
+                          color: Colors.black45,
+                          shape: const CircleBorder(),
+                          child: InkWell(
+                            customBorder: const CircleBorder(),
+                            onTap: () => _confirmAndDelete(img),
+                            child: const Padding(
+                              padding: EdgeInsets.all(4.0),
+                              child: Icon(
+                                Icons.delete_outline,
+                                size: 16,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                    // Deleting overlay
                     if (deleting)
                       Container(
                         decoration: BoxDecoration(
-                          color: (theme.colorScheme.scrim).withOpacity(
-                            0.45,
-                          ), // subtle overlay
+                          color: theme.colorScheme.scrim.withOpacity(0.45),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: const Center(

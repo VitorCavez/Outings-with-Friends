@@ -13,10 +13,14 @@ class AuthProvider extends ChangeNotifier {
   String? _token;
   String? _currentUserId;
 
+  /// Has loadFromStorage() (or login/logout) completed at least once?
+  bool _initialized = false;
+
   // Primary getters
   String? get token => _token;
   String? get currentUserId => _currentUserId;
   bool get isLoggedIn => _token != null && _token!.isNotEmpty;
+  bool get isInitialized => _initialized;
 
   // Alias used by various parts of the app (router, services)
   String? get authToken => _token;
@@ -28,17 +32,20 @@ class AuthProvider extends ChangeNotifier {
       _token = sp.getString(_kTokenKey);
       _currentUserId = sp.getString(_kUserIdKey);
       debugPrint(
-        '🔁 loadFromStorage: tokenLen=${_token?.length ?? 0}, uid=$_currentUserId',
+        '🔁 AuthProvider.loadFromStorage: tokenLen=${_token?.length ?? 0}, uid=$_currentUserId',
       );
-      notifyListeners();
     } catch (e) {
-      debugPrint('⚠️ loadFromStorage error: $e');
+      debugPrint('⚠️ AuthProvider.loadFromStorage error: $e');
+    } finally {
+      _initialized = true;
+      notifyListeners();
     }
   }
 
   Future<void> _applyAuthResult(AuthResult result) async {
     _token = result.token;
     _currentUserId = result.userId;
+    _initialized = true; // we now definitively know the auth state
     debugPrint(
       '🔐 AuthProvider.applyAuthResult: tokenLen=${_token?.length ?? 0}, uid=$_currentUserId',
     );
@@ -51,7 +58,7 @@ class AuthProvider extends ChangeNotifier {
         '💾 AuthProvider.persisted: tokenLen=${_token!.length}, uid=$_currentUserId',
       );
     } catch (e) {
-      debugPrint('⚠️ persist token error: $e');
+      debugPrint('⚠️ AuthProvider.persist token error: $e');
     }
 
     notifyListeners();
@@ -78,19 +85,20 @@ class AuthProvider extends ChangeNotifier {
 
   /// Clears in-memory + persisted auth state.
   Future<void> logout() async {
-    debugPrint('🚪 logout(): clearing token + userId…');
+    debugPrint('🚪 AuthProvider.logout(): clearing token + userId…');
     _token = null;
     _currentUserId = null;
+    _initialized = true; // state is now "known" (logged out)
 
     try {
       final sp = await SharedPreferences.getInstance();
       await sp.remove(_kTokenKey);
       await sp.remove(_kUserIdKey);
       debugPrint(
-        '✅ after remove: token=${sp.getString(_kTokenKey)}, uid=${sp.getString(_kUserIdKey)}',
+        '✅ AuthProvider.after remove: token=${sp.getString(_kTokenKey)}, uid=${sp.getString(_kUserIdKey)}',
       );
     } catch (e) {
-      debugPrint('⚠️ clear token error: $e');
+      debugPrint('⚠️ AuthProvider.clear token error: $e');
     }
 
     notifyListeners();

@@ -2,8 +2,33 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
+/**
+ * Extract current user id from:
+ * - req.user.userId (JWT payload from auth_middleware)
+ * - req.user.id     (legacy shape)
+ * - x-user-id / x-userid header (fallback)
+ */
 function getAuthUserId(req) {
-  return req.user?.id || req.headers['x-user-id'] || null;
+  let uid = null;
+
+  if (req.user && (req.user.userId || req.user.id)) {
+    uid = req.user.userId || req.user.id;
+  } else {
+    uid =
+      req.headers['x-user-id'] ||
+      req.headers['x-userid'] ||
+      null;
+  }
+
+  console.log(
+    '[itinerary] getAuthUserId',
+    req.method,
+    req.originalUrl,
+    '→',
+    uid
+  );
+
+  return uid || null;
 }
 
 /**
@@ -80,8 +105,20 @@ async function createItineraryItem(req, res) {
     const outing = await prisma.outing.findUnique({ where: { id: outingId } });
     if (!outing) return res.status(404).json({ ok: false, error: 'OUTING_NOT_FOUND' });
 
-    const { title, notes, locationName, latitude, longitude, startTime, endTime, orderIndex } = req.body || {};
-    if (!title) return res.status(400).json({ ok: false, error: 'TITLE_REQUIRED' });
+    const {
+      title,
+      notes,
+      locationName,
+      latitude,
+      longitude,
+      startTime,
+      endTime,
+      orderIndex,
+    } = req.body || {};
+
+    if (!title) {
+      return res.status(400).json({ ok: false, error: 'TITLE_REQUIRED' });
+    }
 
     const created = await prisma.itineraryItem.create({
       data: {
@@ -118,7 +155,16 @@ async function updateItineraryItem(req, res) {
       return res.status(404).json({ ok: false, error: 'ITEM_NOT_FOUND' });
     }
 
-    const { title, notes, locationName, latitude, longitude, startTime, endTime, orderIndex } = req.body || {};
+    const {
+      title,
+      notes,
+      locationName,
+      latitude,
+      longitude,
+      startTime,
+      endTime,
+      orderIndex,
+    } = req.body || {};
 
     const updated = await prisma.itineraryItem.update({
       where: { id: itemId },
@@ -128,8 +174,12 @@ async function updateItineraryItem(req, res) {
         ...(locationName !== undefined ? { locationName } : {}),
         ...(latitude !== undefined ? { latitude } : {}),
         ...(longitude !== undefined ? { longitude } : {}),
-        ...(startTime !== undefined ? { startTime: startTime ? new Date(startTime) : null } : {}),
-        ...(endTime !== undefined ? { endTime: endTime ? new Date(endTime) : null } : {}),
+        ...(startTime !== undefined
+          ? { startTime: startTime ? new Date(startTime) : null }
+          : {}),
+        ...(endTime !== undefined
+          ? { endTime: endTime ? new Date(endTime) : null }
+          : {}),
         ...(orderIndex !== undefined ? { orderIndex: Number(orderIndex) } : {}),
       },
     });

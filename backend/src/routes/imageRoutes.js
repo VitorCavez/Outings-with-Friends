@@ -1,30 +1,48 @@
 // backend/src/routes/imageRoutes.js
 const express = require('express');
 const router = express.Router();
-const { uploader } = require('../services/cloudinary');
-const { listOutingImages, uploadOutingImage, deleteImage } = require('../controllers/imageController');
 
-// If you have an auth middleware, require it here, e.g.:
-// const { requireAuth } = require('../middleware/auth');
+const { uploader } = require('../services/cloudinary');
+const {
+  listOutingImages,
+  uploadOutingImage,
+  deleteImage,
+} = require('../controllers/imageController');
+
+const { authenticateToken } = require('./auth_middleware');
 
 // List images for an outing
-router.get('/api/outings/:outingId/images', /* requireAuth, */ listOutingImages);
+// (You can remove authenticateToken here if you truly want this to be public.)
+router.get(
+  '/api/outings/:outingId/images',
+  authenticateToken,
+  listOutingImages
+);
 
 // Upload image for an outing (multipart/form-data, field name "image")
+// Same endpoint is also used for JSON body (Unsplash URL); controller
+// should handle both a file upload and { imageUrl, imageSource } payloads.
 router.post(
   '/api/outings/:outingId/images',
-  /* requireAuth, */
+  authenticateToken,
   uploader.single('image'),
   uploadOutingImage
 );
 
 // Delete image by id
-router.delete('/api/images/:imageId', /* requireAuth, */ deleteImage);
+// Frontend calls DELETE /api/images/:imageId
+router.delete(
+  '/api/images/:imageId',
+  authenticateToken,
+  deleteImage
+);
 
-/** Defines its own /api/* paths */
-router.get('/api/images/:id', async (req, res) => {
+// (Optional) Fetch single image metadata – kept simple for now.
+router.get('/api/images/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
+    // If you later store extra metadata for a single image,
+    // you can look it up here. For now we just echo the id.
     res.json({ id, url: null, caption: null });
   } catch (err) {
     console.error('imageRoutes error:', err);

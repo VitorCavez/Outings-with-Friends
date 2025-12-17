@@ -945,6 +945,28 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   }
 
   Widget _buildMapView(ColorScheme cs) {
+    // Mapbox desktop support is limited; on Windows we just show
+    // a friendly fallback and ask the user to use List view.
+    if (!_isMobile) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.map_outlined, size: 40, color: cs.onSurfaceVariant),
+              const SizedBox(height: 12),
+              const Text(
+                "Map view isn't available on desktop yet.\n"
+                "Use the List tab to browse nearby outings.",
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     final totalCount = _featured.length + _suggested.length;
 
     return Stack(
@@ -1411,6 +1433,16 @@ class _ListCard extends StatelessWidget {
             width: 56,
             height: 56,
             fit: BoxFit.cover,
+            // 👇 New: graceful fallback instead of red error text
+            errorBuilder: (context, error, stackTrace) {
+              return Container(
+                width: 56,
+                height: 56,
+                color: cs.surfaceContainerHighest,
+                alignment: Alignment.center,
+                child: Icon(Icons.photo, color: cs.onSurfaceVariant, size: 24),
+              );
+            },
           ),
         ),
         title: Text(outing.title, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -1537,21 +1569,25 @@ class _FiltersSheetState extends State<_FiltersSheet> {
   late double _radiusKm;
   late Set<String> _types;
 
-  static const _allTypes = <String>[
-    'Food',
-    'Drinks',
-    'Hike',
-    'Music',
-    'Sports',
-    'Museum',
-    'Other',
-  ];
+  // Backend codes → nice labels
+  static const Map<String, String> _typeLabels = {
+    'food_and_drink': 'Food & drink',
+    'outdoor': 'Outdoor',
+    'concert': 'Concert',
+    'sports': 'Sports',
+    'movie': 'Movie',
+    'other': 'Other',
+  };
 
   @override
   void initState() {
     super.initState();
     _radiusKm = widget.initialRadiusKm;
-    _types = {...widget.selectedTypes};
+
+    // Keep only valid backend codes, drop any old human-readable labels
+    _types = widget.selectedTypes
+        .where((t) => _typeLabels.keys.contains(t))
+        .toSet();
   }
 
   @override
@@ -1606,17 +1642,20 @@ class _FiltersSheetState extends State<_FiltersSheet> {
               Wrap(
                 spacing: 8,
                 runSpacing: -6,
-                children: _allTypes.map((t) {
-                  final selected = _types.contains(t);
+                children: _typeLabels.entries.map((entry) {
+                  final code = entry.key; // e.g. "food_and_drink"
+                  final label = entry.value; // e.g. "Food & drink"
+                  final selected = _types.contains(code);
+
                   return FilterChip(
-                    label: Text(t),
+                    label: Text(label),
                     selected: selected,
                     onSelected: (v) {
                       setState(() {
                         if (v) {
-                          _types.add(t);
+                          _types.add(code);
                         } else {
-                          _types.remove(t);
+                          _types.remove(code);
                         }
                       });
                     },

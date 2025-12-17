@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
-// Read current auth state safely (works with your dynamic fields pattern)
+// Auth state
 import 'package:outings_app/features/auth/auth_provider.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -15,16 +15,16 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _fadeCtrl = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 400),
-  )..forward();
+  late final AnimationController _fadeCtrl;
+  bool _navigated = false;
 
   @override
   void initState() {
     super.initState();
-    // Kick off the auth check on the next microtask so build() can run first
-    Future.microtask(_routeFromAuth);
+    _fadeCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    )..forward();
   }
 
   @override
@@ -33,81 +33,69 @@ class _SplashScreenState extends State<SplashScreen>
     super.dispose();
   }
 
-  Future<void> _routeFromAuth() async {
-    // Optional: ensure the splash is visible briefly for UX
-    const minSplash = Duration(milliseconds: 600);
-    final started = DateTime.now();
+  void _maybeNavigate(AuthProvider auth) {
+    if (!mounted || _navigated) return;
+    if (!auth.isInitialized) return; // still reading SharedPreferences
 
-    final isLoggedIn = _isLoggedInFromContext();
+    _navigated = true;
 
-    final elapsed = DateTime.now().difference(started);
-    if (elapsed < minSplash) {
-      await Future.delayed(minSplash - elapsed);
-    }
-
-    if (!mounted) return;
-    context.go(isLoggedIn ? '/home' : '/login');
-  }
-
-  bool _isLoggedInFromContext() {
-    try {
-      final auth = context.read<AuthProvider?>();
-      final dyn = auth as dynamic;
-
-      final uid = dyn?.currentUserId;
-      final token =
-          (dyn?.authToken ?? dyn?.token ?? dyn?.accessToken ?? dyn?.jwt)
-              as String?;
-      final hasUid = uid != null && uid.toString().isNotEmpty;
-      final hasToken = (token ?? '').isNotEmpty;
-
-      return hasUid || hasToken;
-    } catch (_) {
-      return false;
-    }
+    // Decide target: logged-in users go straight into the app, others to login.
+    final target = auth.isLoggedIn ? '/home' : '/login';
+    context.go(target);
   }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    return Scaffold(
-      backgroundColor: cs.surface,
-      body: Center(
-        child: FadeTransition(
-          opacity: _fadeCtrl,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Simple brand mark
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: cs.primaryContainer,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Icon(
-                  Icons.people_alt_rounded,
-                  color: cs.onPrimaryContainer,
-                  size: 40,
-                ),
+    return Consumer<AuthProvider>(
+      builder: (context, auth, _) {
+        if (auth.isInitialized && !_navigated) {
+          // Schedule navigation after this frame to avoid calling go() in build
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _maybeNavigate(auth);
+          });
+        }
+
+        return Scaffold(
+          backgroundColor: cs.surface,
+          body: Center(
+            child: FadeTransition(
+              opacity: _fadeCtrl,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Simple brand mark
+                  Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      color: cs.primaryContainer,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Icon(
+                      Icons.people_alt_rounded,
+                      color: cs.onPrimaryContainer,
+                      size: 40,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Outings with Friends',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 16),
+                  const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              Text(
-                'Outings with Friends',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 16),
-              const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

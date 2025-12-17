@@ -9,9 +9,12 @@ import 'package:intl/intl.dart';
 import '../../config/app_config.dart';
 import '../auth/auth_provider.dart';
 
-// Autocomplete
+// Autocomplete (still used; just not required)
 import '../../widgets/place_autocomplete_field.dart';
 import '../../services/places_service.dart';
+
+// 🔍 Same geocoding as Discover tab
+import '../../services/geocoding_service.dart';
 
 class CreateOutingScreen extends StatefulWidget {
   const CreateOutingScreen({super.key});
@@ -28,35 +31,48 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
   final _descriptionCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
 
-  // Filled by the place autocomplete
+  // Location fields
   String? _locationName;
   double? _lat;
   double? _lng;
+
+  // Manual coordinate fields (for copy/paste)
+  final _latCtrl = TextEditingController();
+  final _lngCtrl = TextEditingController();
 
   // Piggy Bank
   bool _piggyBankEnabled = true;
   final _piggyBankTargetEuroCtrl = TextEditingController(text: '50.00');
 
   // Outing Type
-  final List<String> _types = const [
-    'food_and_drink',
-    'outdoor',
-    'concert',
-    'sports',
-    'movie',
-    'other',
-  ];
+  static const Map<String, String> _typeLabels = {
+    'food_and_drink': 'Food & drink',
+    'outdoor': 'Outdoor',
+    'concert': 'Concert',
+    'sports': 'Sports',
+    'movie': 'Movie',
+    'other': 'Other',
+  };
+
+  final List<String> _types = _typeLabels.keys.toList();
+
   String _outingType = 'food_and_drink';
 
   // Dates
   DateTime _start = DateTime.now().add(const Duration(hours: 1));
   DateTime _end = DateTime.now().add(const Duration(hours: 3));
 
+  // Geocoding
+  final _geo = GeocodingService();
+  bool _findingCoords = false;
+
   @override
   void dispose() {
     _titleCtrl.dispose();
     _descriptionCtrl.dispose();
     _addressCtrl.dispose();
+    _latCtrl.dispose();
+    _lngCtrl.dispose();
     _piggyBankTargetEuroCtrl.dispose();
     super.dispose();
   }
@@ -87,7 +103,9 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
     setState(() {
       if (isStart) {
         _start = picked;
-        if (_end.isBefore(_start)) _end = _start.add(const Duration(hours: 2));
+        if (_end.isBefore(_start)) {
+          _end = _start.add(const Duration(hours: 2));
+        }
       } else {
         _end = picked.isAfter(_start)
             ? picked
@@ -113,11 +131,74 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
     }
   }
 
+  // 🔍 Use OpenCage-based GeocodingService to auto-fill coordinates
+  Future<void> _findCoordsFromText() async {
+    final parts = <String>[];
+
+    // We only know _locationName when user selects from autocomplete.
+    if (_locationName != null && _locationName!.trim().isNotEmpty) {
+      parts.add(_locationName!.trim());
+    }
+
+    final addr = _addressCtrl.text.trim();
+    if (addr.isNotEmpty) {
+      parts.add(addr);
+    }
+
+    final query = parts.join(', ');
+
+    if (query.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Enter a location name and/or address before searching.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _findingCoords = true);
+    try {
+      final resp = await _geo.forward(address: query, limit: 1, language: 'en');
+
+      if (!mounted) return;
+
+      if (!resp.ok || resp.results.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not find that address. Try another.'),
+          ),
+        );
+        return;
+      }
+
+      final best = resp.results.first;
+      _lat = best.coordinates.lat;
+      _lng = best.coordinates.lng;
+
+      _latCtrl.text = _lat!.toStringAsFixed(6);
+      _lngCtrl.text = _lng!.toStringAsFixed(6);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Location found: ${best.formatted}')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Geocoding error: $e')));
+    } finally {
+      if (mounted) {
+        setState(() => _findingCoords = false);
+      }
+    }
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
-    // Ensure we always send some non-empty locationName to the backend.
-    // If the autocomplete didn't fire, we fall back to the address or a generic label.
+    // --- Resolve location name (never empty) ---
     String locationName = (_locationName ?? '').trim();
     if (locationName.isEmpty) {
       final addr = _addressCtrl.text.trim();
@@ -126,6 +207,26 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
       } else {
         locationName = 'Custom place';
       }
+    }
+
+    // --- Resolve coordinates ---
+    // Priority: manual text fields → internal _lat/_lng from autocomplete/geocode
+    double? lat = _latCtrl.text.trim().isNotEmpty
+        ? double.tryParse(_latCtrl.text.trim())
+        : _lat;
+    double? lng = _lngCtrl.text.trim().isNotEmpty
+        ? double.tryParse(_lngCtrl.text.trim())
+        : _lng;
+
+    if (lat == null || lng == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Please find the coordinates first (use "Find coordinates") or enter them manually.',
+          ),
+        ),
+      );
+      return;
     }
 
     final title = _titleCtrl.text.trim();
@@ -154,8 +255,8 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
       "description": description,
       "outingType": _outingType,
       "locationName": locationName,
-      "latitude": _lat,
-      "longitude": _lng,
+      "latitude": lat,
+      "longitude": lng,
       "address": address,
       "dateTimeStart": _start.toUtc().toIso8601String(),
       "dateTimeEnd": _end.toUtc().toIso8601String(),
@@ -215,6 +316,7 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
   }
 
   String _readToken() => _readJwt(context);
+
   String _formatDT(DateTime dt) =>
       DateFormat('EEE, d MMM yyyy • HH:mm').format(dt.toLocal());
 
@@ -244,7 +346,12 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
             DropdownButtonFormField<String>(
               initialValue: _outingType,
               items: _types
-                  .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                  .map(
+                    (code) => DropdownMenuItem(
+                      value: code,
+                      child: Text(_typeLabels[code] ?? code),
+                    ),
+                  )
                   .toList(),
               onChanged: (v) => setState(() => _outingType = v ?? _outingType),
               decoration: const InputDecoration(
@@ -258,7 +365,7 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
             ),
             const SizedBox(height: 12),
 
-            // Location (autocomplete)
+            // Location (autocomplete - optional helper)
             PlaceAutocompleteField(
               labelText: 'Location name',
               token: _readToken(),
@@ -268,6 +375,12 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
                   _addressCtrl.text = p.address ?? _addressCtrl.text;
                   _lat = p.latitude;
                   _lng = p.longitude;
+                  if (_lat != null) {
+                    _latCtrl.text = _lat!.toStringAsFixed(6);
+                  }
+                  if (_lng != null) {
+                    _lngCtrl.text = _lng!.toStringAsFixed(6);
+                  }
                 });
               },
             ),
@@ -278,6 +391,74 @@ class _CreateOutingScreenState extends State<CreateOutingScreen> {
               decoration: const InputDecoration(
                 labelText: 'Address (optional)',
                 prefixIcon: Icon(Icons.map),
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // Coordinates + "Find coordinates" helper
+            Text('Coordinates', style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _latCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'Latitude',
+                      helperText: 'e.g. 53.3498',
+                    ),
+                    validator: (v) {
+                      final txt = v?.trim() ?? '';
+                      if (txt.isEmpty) return null; // can be auto-filled
+                      final ok = double.tryParse(txt);
+                      if (ok == null) {
+                        return 'Enter a number';
+                      }
+                      return null;
+                    },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextFormField(
+                    controller: _lngCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'Longitude',
+                      helperText: 'e.g. -6.2603',
+                    ),
+                    validator: (v) {
+                      final txt = v?.trim() ?? '';
+                      if (txt.isEmpty) return null; // can be auto-filled
+                      final ok = double.tryParse(txt);
+                      if (ok == null) {
+                        return 'Enter a number';
+                      }
+                      return null;
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: _findingCoords ? null : _findCoordsFromText,
+                icon: _findingCoords
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.search),
+                label: Text(_findingCoords ? 'Searching…' : 'Find coordinates'),
               ),
             ),
 

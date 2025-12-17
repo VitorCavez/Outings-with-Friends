@@ -1,5 +1,6 @@
 // lib/services/itinerary_service.dart
 import 'dart:convert';
+
 import '../models/itinerary_item.dart';
 import 'api_client.dart';
 
@@ -22,8 +23,7 @@ class ItineraryService {
 
   /// GET /api/outings/:outingId/itinerary/suggested
   Future<List<ItineraryItem>> suggested(String outingId) async {
-    final r =
-        await api.get('/api/outings/$outingId/itinerary/suggested');
+    final r = await api.get('/api/outings/$outingId/itinerary/suggested');
     if (r.statusCode != 200) {
       throw Exception('Suggested itinerary failed (${r.statusCode})');
     }
@@ -32,15 +32,13 @@ class ItineraryService {
     // Suggested items don’t have DB ids — synthesize stable client-only ids
     int i = 0;
     return raw
-        .map((j) => ItineraryItem.fromJson({
-              'id': 'suggested_$i',
-              ...j,
-            }))
+        .map((j) => ItineraryItem.fromJson({'id': 'suggested_$i', ...j}))
         .toList();
   }
 
   /// POST /api/outings/:outingId/itinerary
-  Future<ItineraryItem> create(String outingId, {
+  Future<ItineraryItem> create(
+    String outingId, {
     required String title,
     String? notes,
     String? locationName,
@@ -69,7 +67,9 @@ class ItineraryService {
   }
 
   /// PUT /api/outings/:outingId/itinerary/:itemId
-  Future<ItineraryItem> update(String outingId, String itemId, {
+  Future<ItineraryItem> update(
+    String outingId,
+    String itemId, {
     String? title,
     String? notes,
     String? locationName,
@@ -89,7 +89,10 @@ class ItineraryService {
       if (endTime != null) 'endTime': endTime.toUtc().toIso8601String(),
       if (orderIndex != null) 'orderIndex': orderIndex,
     };
-    final r = await api.putJson('/api/outings/$outingId/itinerary/$itemId', body);
+    final r = await api.putJson(
+      '/api/outings/$outingId/itinerary/$itemId',
+      body,
+    );
     if (r.statusCode != 200) {
       throw Exception('Update itinerary failed (${r.statusCode})');
     }
@@ -99,27 +102,14 @@ class ItineraryService {
 
   /// DELETE /api/outings/:outingId/itinerary/:itemId
   Future<bool> remove(String outingId, String itemId) async {
-    // Using http.delete via ApiClient would be nice; ApiClient currently has GET/POST/PUT.
-    // We can call low-level http directly or add deleteJson() to ApiClient.
-    // For now, use http.Request manually:
-    final uri = Uri.parse('${api.baseUrl}/api/outings/$outingId/itinerary/$itemId');
-    final req = await Future.value(() => uri); // silence lints
-    // Quick low-level DELETE:
-    final client = ApiClient(baseUrl: api.baseUrl, authToken: api.authToken);
-    final resp = await client.get('/api/outings/$outingId/itinerary'); // warmup noop
-    // Actually send DELETE
-    final r = await Future.sync(() async {
-      final http = await importHttp();
-      final request = http.Request('DELETE', uri);
-      if (api.authToken != null && api.authToken!.isNotEmpty) {
-        request.headers['Authorization'] = 'Bearer ${api.authToken}';
-      }
-      final streamed = await http.Client().send(request);
-      return streamed.statusCode;
-    });
-    return r == 200;
+    final r = await api.delete('/api/outings/$outingId/itinerary/$itemId');
+
+    // Success: 200 OK or 204 No Content
+    if (r.statusCode == 200 || r.statusCode == 204) {
+      return true;
+    }
+
+    // For anything else, treat as failure so the caller can reload / show error.
+    return false;
   }
 }
-
-/// Lightweight dynamic import wrapper to placate analyzers without adding a direct import here
-Future<dynamic> importHttp() async => await Future.value((() => null)());

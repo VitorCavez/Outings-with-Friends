@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+
 import '../models/outing_image.dart';
 import 'api_client.dart';
 
@@ -39,28 +40,32 @@ class ImagesService {
       Uri.parse('${api.baseUrl}/api/outings/$outingId/images'),
     );
 
-    // auth header
+    // auth header (ApiClient doesn’t help with MultipartRequest)
     if (api.authToken != null && api.authToken!.isNotEmpty) {
       request.headers['Authorization'] = 'Bearer ${api.authToken}';
     }
 
-    request.files.add(http.MultipartFile(
-      'image',
-      http.ByteStream(f.openRead()),
-      length,
-      filename: filename,
-    ));
+    request.files.add(
+      http.MultipartFile(
+        'image',
+        http.ByteStream(f.openRead()),
+        length,
+        filename: filename,
+      ),
+    );
 
     final resp = await request.send();
     final body = await resp.stream.bytesToString();
+
     if (resp.statusCode != 201) {
       throw Exception('uploadOutingImage failed (${resp.statusCode}): $body');
     }
+
     final map = jsonDecode(body) as Map<String, dynamic>;
     return OutingImage.fromJson(map['data'] as Map<String, dynamic>);
   }
 
-  /// ✅ NEW: Attach an image by URL (e.g., Unsplash)
+  /// Attach an image by URL (e.g., Unsplash)
   /// POST /api/outings/:outingId/images  (JSON body)
   /// { "imageUrl": "...", "imageSource": "unsplash" }
   Future<OutingImage> addFromUrl(
@@ -68,13 +73,10 @@ class ImagesService {
     required String imageUrl,
     String imageSource = 'unsplash',
   }) async {
-    final r = await api.postJson(
-      '/api/outings/$outingId/images',
-      {
-        'imageUrl': imageUrl,
-        'imageSource': imageSource,
-      },
-    );
+    final r = await api.postJson('/api/outings/$outingId/images', {
+      'imageUrl': imageUrl,
+      'imageSource': imageSource,
+    });
     if (r.statusCode != 201) {
       throw Exception('addFromUrl failed (${r.statusCode}): ${r.body}');
     }
@@ -84,15 +86,23 @@ class ImagesService {
 
   /// DELETE /api/images/:imageId
   Future<bool> deleteImage(String imageId) async {
-    // Direct DELETE
     final req = http.Request(
       'DELETE',
       Uri.parse('${api.baseUrl}/api/images/$imageId'),
     );
+
     if (api.authToken != null && api.authToken!.isNotEmpty) {
       req.headers['Authorization'] = 'Bearer ${api.authToken}';
     }
+
     final streamed = await req.send();
-    return streamed.statusCode == 200;
+    // Treat both 200 OK and 204 No Content as success
+    final status = streamed.statusCode;
+    if (status == 200 || status == 204) {
+      return true;
+    }
+
+    final body = await streamed.stream.bytesToString();
+    throw Exception('deleteImage failed ($status): $body');
   }
 }
