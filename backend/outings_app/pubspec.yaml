@@ -10,6 +10,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_launcher_icons: ^0.13.1
 
   # Routing, HTTP, state, UI utils
   cupertino_icons: ^1.0.8
@@ -57,6 +58,22 @@ dev_dependencies:
   integration_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_native_splash: ^2.4.2
 
 flutter:
   uses-material-design: true
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icons/app_icon.png"
+  adaptive_icon_background: "#1751A6"   # your primary blue
+  adaptive_icon_foreground: "assets/icons/app_icon.png"
+
+flutter_native_splash:
+  color: "#F5F6FB"          # light background that fits your current UI
+  image: assets/icons/app_icon.png
+
+  android_12:
+    icon_background_color: "#F5F6FB"
+    image: assets/icons/app_icon.png

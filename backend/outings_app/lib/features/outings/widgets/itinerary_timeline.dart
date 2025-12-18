@@ -348,7 +348,9 @@ class _ItineraryTimelineState extends State<ItineraryTimeline> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final primaryText = scheme.onSurface;
     final subtle = scheme.onSurfaceVariant;
 
     if (_loading && _items.isEmpty) {
@@ -416,7 +418,7 @@ class _ItineraryTimelineState extends State<ItineraryTimeline> {
                         Container(
                           width: 2,
                           height: 40,
-                          color: Theme.of(context).dividerColor,
+                          color: theme.dividerColor,
                         ),
                     ],
                   ),
@@ -429,7 +431,10 @@ class _ItineraryTimelineState extends State<ItineraryTimeline> {
                       children: [
                         Text(
                           it.title,
-                          style: Theme.of(context).textTheme.titleMedium,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: primaryText,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         const SizedBox(height: 4),
                         if (it.locationName != null)
@@ -445,7 +450,10 @@ class _ItineraryTimelineState extends State<ItineraryTimeline> {
                           ),
                         if (it.notes?.isNotEmpty == true) ...[
                           const SizedBox(height: 6),
-                          Text(it.notes!, style: const TextStyle(height: 1.3)),
+                          Text(
+                            it.notes!,
+                            style: TextStyle(height: 1.3, color: primaryText),
+                          ),
                         ],
                         const SizedBox(height: 6),
                         Row(

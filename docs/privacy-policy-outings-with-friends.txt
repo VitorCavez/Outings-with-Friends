@@ -1,0 +1,63 @@
+Outings with Friends – Privacy Policy
+Last updated: 18 December 2025
+
+1. Who we are
+Outings with Friends (“the App”) is provided by Cavez AI Innovations. 
+If you have any questions about this policy, you can contact us at:
+Email: theirishcavez@gmail.com
+
+2. What the app does
+Outings with Friends helps you plan activities with friends, track itineraries, manage shared expenses, and chat about your plans.
+
+3. Data we collect
+
+3.1 Account information
+- When you create an account, we may collect your email address, name, and profile picture.
+- This is used to create your profile, let you sign in, and show your name and avatar to your contacts and group members.
+
+3.2 Outing and content data
+- When you create outings, we store details like title, date/time, location, itinerary items, images, Piggy Bank contributions, and expenses.
+- This information is used only to provide the core features of the app (planning, sharing, and tracking events with others you choose).
+
+3.3 Location data
+- Location is used when you choose to select or share a place on the map.
+- We do not track your location in the background.
+- Location is only used while you interact with map/location features.
+
+3.4 Photos and media
+- When you add an image to an outing, we request access to your camera or photo library.
+- We only access the photos you choose to upload. These images are stored on our servers to show them inside the app to you and the participants of that outing.
+
+3.5 Usage and technical data
+- We may collect basic technical information such as device type, operating system, and error logs.
+- This is used to improve performance, fix bugs, and keep the app reliable.
+
+4. Notifications
+- With your permission, we send push notifications about new messages, invites, and activity related to your outings.
+- You can turn notifications off at any time in your device settings.
+
+5. How we share data
+We do not sell your data.
+We may share limited data in these cases:
+- With other participants in an outing (for example, your name, profile picture, messages, and the outing details you choose to share).
+- With service providers that help us run the app (for example, hosting, storage, and notification services), under appropriate data protection agreements.
+- When required by law, to comply with a legal request or protect our rights.
+
+6. Data retention
+- We keep your account data for as long as you have an account.
+- You may request deletion of your account, after which we will delete or anonymise your personal data within a reasonable timeframe, except where we must keep some information for legal or security reasons.
+
+7. Security
+We take reasonable technical and organisational measures to protect your data, such as using secure connections (HTTPS) and access controls on our servers.  
+However, no online service can be 100% secure.
+
+8. Children’s privacy
+Outings with Friends is not intended for children under 13, and we do not knowingly collect personal information from children under 13.
+
+9. Changes to this policy
+We may update this Privacy Policy from time to time.  
+If we make significant changes, we will notify you in the app or by other appropriate means. The updated policy will be effective when posted.
+
+10. Contact
+If you have questions or requests about your data (including access or deletion), contact us at:
+Email: theirishcavez@gmail.com

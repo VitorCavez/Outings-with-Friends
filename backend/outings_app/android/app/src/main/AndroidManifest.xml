@@ -24,7 +24,7 @@
 
     <application
         android:name="${applicationName}"
-        android:label="outings_app"
+        android:label="Outings with Friends"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
 
