@@ -1,63 +1,233 @@
-Outings with Friends – Privacy Policy
-Last updated: 18 December 2025
+Privacy Policy – Outings with Friends
 
-1. Who we are
-Outings with Friends (“the App”) is provided by Cavez AI Innovations. 
-If you have any questions about this policy, you can contact us at:
-Email: theirishcavez@gmail.com
+Last updated: 19 December 2025
 
-2. What the app does
-Outings with Friends helps you plan activities with friends, track itineraries, manage shared expenses, and chat about your plans.
+This Privacy Policy explains how Outings with Friends (“we”, “us”, “our”) collects, uses and protects your information when you use our mobile application and related services (collectively, the “App”).
 
-3. Data we collect
+By creating an account or using the App, you agree to the collection and use of information in accordance with this Policy.
 
-3.1 Account information
-- When you create an account, we may collect your email address, name, and profile picture.
-- This is used to create your profile, let you sign in, and show your name and avatar to your contacts and group members.
+1. Information we collect
 
-3.2 Outing and content data
-- When you create outings, we store details like title, date/time, location, itinerary items, images, Piggy Bank contributions, and expenses.
-- This information is used only to provide the core features of the app (planning, sharing, and tracking events with others you choose).
+We collect the following types of information:
 
-3.3 Location data
-- Location is used when you choose to select or share a place on the map.
-- We do not track your location in the background.
-- Location is only used while you interact with map/location features.
+1.1 Account information
 
-3.4 Photos and media
-- When you add an image to an outing, we request access to your camera or photo library.
-- We only access the photos you choose to upload. These images are stored on our servers to show them inside the app to you and the participants of that outing.
+When you create an account, we may collect:
 
-3.5 Usage and technical data
-- We may collect basic technical information such as device type, operating system, and error logs.
-- This is used to improve performance, fix bugs, and keep the app reliable.
+Name or display name
 
-4. Notifications
-- With your permission, we send push notifications about new messages, invites, and activity related to your outings.
-- You can turn notifications off at any time in your device settings.
+Email address
 
-5. How we share data
-We do not sell your data.
-We may share limited data in these cases:
-- With other participants in an outing (for example, your name, profile picture, messages, and the outing details you choose to share).
-- With service providers that help us run the app (for example, hosting, storage, and notification services), under appropriate data protection agreements.
-- When required by law, to comply with a legal request or protect our rights.
+Password (stored using industry-standard hashing)
+
+Profile photo (optional)
+
+1.2 Outing & content data
+
+To provide the core functionality of the App, we store information you choose to add, such as:
+
+Outing titles, descriptions, dates and times
+
+Locations and map coordinates for outings and itinerary items
+
+Itinerary notes and schedule details
+
+Uploaded images for an outing
+
+Piggy Bank targets and contribution amounts
+
+Expense entries, including amount, description and category
+
+Lists of participants and invitations (e.g., email addresses or phone numbers you choose to invite)
+
+1.3 Usage & device information
+
+When you use the App, we may automatically collect:
+
+Log data (e.g., API requests, error logs, timestamps)
+
+Device type, operating system version, and app version
+
+General usage information (e.g., which screens are opened, basic interaction flows)
+
+We do not collect your phone’s contact list automatically. When you manually type an email or phone number to invite someone, that contact information is only used to send or record the invitation.
+
+1.4 Location information
+
+With your permission, the App may access your approximate or precise location in order to:
+
+Help you set an outing location
+
+Show location-related features within the App (e.g., maps)
+
+You can control location access at any time in your device settings. If you disable location, some features may not work fully, but you can still use the App by entering locations manually.
+
+1.5 Push notification tokens
+
+If you opt in to notifications, we collect a device notification token (e.g., via Firebase Cloud Messaging) so we can send you:
+
+Updates about your outings
+
+Invites and relevant reminders
+
+Important service messages
+
+You can turn notifications off at any time in your device settings.
+
+2. How we use your information
+
+We use the information we collect to:
+
+Create and manage your account
+
+Let you create, view and manage outings, itineraries, images, Piggy Bank and expenses
+
+Show you the outings you organize or are invited to
+
+Send invitations and updates to participants you choose to invite
+
+Provide push notifications and in-app messages
+
+Improve stability and performance (debugging, monitoring errors)
+
+Protect against abuse, fraud or misuse of the service
+
+Comply with legal obligations where applicable
+
+We do not sell your personal data.
+
+3. Legal bases (for users in the EEA/UK)
+
+If you are located in the European Economic Area or the United Kingdom, we process your personal data on the following legal bases:
+
+Contract: to provide you with the App and its features, at your request
+
+Legitimate interests: to improve the App, keep it secure, and understand how it is used, where these interests are not overridden by your rights
+
+Consent: for optional features such as push notifications or access to location, where required
+
+You can withdraw your consent at any time via your device settings (for permissions) or notification settings.
+
+4. How we share your information
+
+We may share your information in these situations:
+
+4.1 With other users
+
+Some information you choose to add will be visible to other participants or viewers of an outing, depending on its visibility settings:
+
+Outing title, date, time and location
+
+Itinerary items and notes
+
+Piggy Bank and expense summaries for that outing
+
+Your name / profile photo where shown as organizer or participant
+
+The visibility settings for an outing (Public, Contacts, Groups, Invited) determine who can see it.
+
+4.2 Service providers and infrastructure
+
+We may share data with third-party providers who help us operate the App, such as:
+
+Hosting and database providers
+
+Push notification services (e.g., Firebase Cloud Messaging)
+
+Map and location providers (e.g., Mapbox)
+
+Email or SMS providers used for invitations or account messages
+
+These providers are allowed to use your data only to perform services on our behalf, and must handle it securely.
+
+4.3 Legal requirements
+
+We may disclose information if required to do so by law or in response to valid legal requests, or when we believe it is necessary to:
+
+Protect our rights or property
+
+Protect the safety of users or the public
+
+Detect or prevent fraud, security or technical issues
+
+We do not share your information with third parties for their own advertising purposes.
+
+5. Data storage & international transfers
+
+Our servers and some of our service providers may be located in countries other than where you live. This means your information may be processed in a country that may have different data protection laws than your own.
+
+We take reasonable steps to ensure that your information is protected in accordance with this Policy wherever it is processed.
 
 6. Data retention
-- We keep your account data for as long as you have an account.
-- You may request deletion of your account, after which we will delete or anonymise your personal data within a reasonable timeframe, except where we must keep some information for legal or security reasons.
 
-7. Security
-We take reasonable technical and organisational measures to protect your data, such as using secure connections (HTTPS) and access controls on our servers.  
-However, no online service can be 100% secure.
+We keep your information for as long as:
+
+Your account is active, or
+
+It is necessary to provide you with the App and its features, or
+
+We have a legitimate business need or legal obligation to retain it.
+
+If you delete your account, we will remove or anonymize your personal data within a reasonable period, subject to any legal requirements to keep certain records (for example, basic log records or security backups).
+
+Outing content (itineraries, expenses, Piggy Bank, messages) will generally be deleted or anonymized as part of account deletion, or when the outing is removed by its organizer.
+
+7. Your rights and choices
+
+Depending on your location, you may have rights over your personal data, including:
+
+Access – request a copy of the information we hold about you
+
+Correction – ask us to correct inaccurate or incomplete data
+
+Deletion – request that we delete your personal data, where applicable
+
+Restriction – request that we limit the processing of your data in certain cases
+
+Objection – object to certain processing, such as for direct marketing
+
+Data portability – receive your data in a commonly used, machine-readable format, where technically feasible
+
+You can also:
+
+Update your profile information in the App
+
+Adjust notification permissions in your device settings
+
+Turn off location access from your device settings
+
+To exercise any of your rights, please contact us using the details in the Contact us section below. We may ask you to verify your identity before responding.
+
+If you are in the EEA/UK, you also have the right to lodge a complaint with your local data protection authority.
 
 8. Children’s privacy
-Outings with Friends is not intended for children under 13, and we do not knowingly collect personal information from children under 13.
 
-9. Changes to this policy
-We may update this Privacy Policy from time to time.  
-If we make significant changes, we will notify you in the app or by other appropriate means. The updated policy will be effective when posted.
+The App is not intended for children under 13 years of age (or the minimum age required by your local law). We do not knowingly collect personal information from children under this age.
 
-10. Contact
-If you have questions or requests about your data (including access or deletion), contact us at:
+If you believe a child has provided us with personal information, please contact us and we will take steps to delete it.
+
+9. Security
+
+We take reasonable technical and organizational measures to protect your information, including:
+
+Using secure connections (HTTPS) where appropriate
+
+Hashing passwords instead of storing them in plain text
+
+Limiting access to personal data to people who need it to operate the service
+
+However, no method of transmission over the internet or electronic storage is 100% secure, so we cannot guarantee absolute security.
+
+10. Changes to this Policy
+
+We may update this Privacy Policy from time to time. When we do, we will change the “Last updated” date at the top.
+
+If changes are significant, we may provide additional notice in the App or by email where appropriate. Your continued use of the App after changes take effect means you accept the updated Policy.
+
+11. Contact us
+
+If you have any questions about this Privacy Policy or your personal data, please contact us at:
+
 Email: theirishcavez@gmail.com
+
+We will do our best to respond within a reasonable time.
