@@ -113,3 +113,5 @@ migrate_working_dir/
 .svn/
 .swiftpm/
 app_links.json
+android/key.properties
+android/outings-upload-keystore.jks

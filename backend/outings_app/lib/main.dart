@@ -104,13 +104,25 @@ class OutingsApp extends StatelessWidget {
 
     return MultiProvider(
       providers: [
-        // 🔑 Load saved token/userId on startup
+        // 🔑 Auth: load saved token/userId on startup
         ChangeNotifierProvider(
           create: (_) => AuthProvider()..loadFromStorage(),
         ),
 
-        // 🔹 Load profile (name + avatar) once at startup
-        ChangeNotifierProvider(create: (_) => ProfileProvider()..load()),
+        // 👤 Profile: depends on Auth so each user gets their own local profile.
+        //
+        // When auth.currentUserId changes (login / logout / switch),
+        // we call profile.loadForUser(userId) to load that user's
+        // saved name + avatar (or reset to defaults when logged out).
+        ChangeNotifierProxyProvider<AuthProvider, ProfileProvider>(
+          create: (_) => ProfileProvider(),
+          update: (context, auth, previous) {
+            final profile = previous ?? ProfileProvider();
+            // Fire-and-forget; provider internally avoids redundant reloads.
+            profile.loadForUser(auth.currentUserId);
+            return profile;
+          },
+        ),
 
         /// 📇 ContactsProvider depends on Auth (for JWT) and base URL (host w/o /api).
         ChangeNotifierProxyProvider<AuthProvider, ContactsProvider>(

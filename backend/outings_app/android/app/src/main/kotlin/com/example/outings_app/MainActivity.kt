@@ -1,4 +1,4 @@
-package com.example.outings_app
+package com.outingswithfriends.app
 
 import io.flutter.embedding.android.FlutterActivity
 

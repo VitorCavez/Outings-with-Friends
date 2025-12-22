@@ -817,7 +817,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
         lat: _lastPosition!.latitude,
         lng: _lastPosition!.longitude,
         filters: effectiveFilters,
-        // removed undefined named parameter `authToken`; service should handle authorization internally
+        // service handles auth internally
       );
 
       final featured = resp.featured.map(Outing.fromModel).toList();
@@ -1414,6 +1414,36 @@ class _ListCard extends StatelessWidget {
     return '${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}';
   }
 
+  // Map backend type codes to human labels
+  String _formatType(String raw) {
+    switch (raw) {
+      case 'food_and_drink':
+        return 'Food & drink';
+      case 'outdoor':
+        return 'Outdoor';
+      case 'concert':
+        return 'Concert';
+      case 'sports':
+        return 'Sports';
+      case 'movie':
+        return 'Movie';
+      case 'other':
+        return 'Other';
+      default:
+        return raw;
+    }
+  }
+
+  // Build "By X • Public" line.
+  // We use `outing.subtitle` as the organiser name when present; otherwise a
+  // friendly generic. Later, if the backend starts sending a real organiser
+  // name in subtitle, it will show up here automatically.
+  String _publisherLine() {
+    final raw = outing.subtitle.trim();
+    final name = raw.isEmpty ? 'organiser' : raw;
+    return 'By $name • Public';
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -1433,7 +1463,7 @@ class _ListCard extends StatelessWidget {
             width: 56,
             height: 56,
             fit: BoxFit.cover,
-            // 👇 New: graceful fallback instead of red error text
+            // 👇 graceful fallback instead of red error text
             errorBuilder: (context, error, stackTrace) {
               return Container(
                 width: 56,
@@ -1446,11 +1476,24 @@ class _ListCard extends StatelessWidget {
           ),
         ),
         title: Text(outing.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Text(
-          '${outing.subtitle} • ${outing.type}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: cs.onSurfaceVariant),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              _formatType(outing.type),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: cs.onSurfaceVariant),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              _publisherLine(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
+            ),
+          ],
         ),
         trailing: Icon(Icons.chevron_right, color: cs.outline),
       ),

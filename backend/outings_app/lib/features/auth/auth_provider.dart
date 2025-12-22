@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart'; // BuildContext
 import 'package:go_router/go_router.dart'; // <- use go_router to exit shell
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart'; // <- for context.read<ProfileProvider>()
+import '../profile/profile_provider.dart'; // <- reset profile on logout
 
 import 'auth_api.dart';
 
@@ -108,6 +110,15 @@ class AuthProvider extends ChangeNotifier {
   Future<void> signOut(BuildContext context) async {
     try {
       await logout();
+
+      // Also clear any locally stored profile info so the next logged-in user
+      // does not see the previous user's display name or avatar.
+      try {
+        final profile = context.read<ProfileProvider?>();
+        await profile?.reset();
+      } catch (e) {
+        debugPrint('⚠️ AuthProvider.signOut profile reset error: $e');
+      }
     } finally {
       // Leave the shell and land on the login route.
       // This avoids residual back stack issues across branches.

@@ -8,6 +8,25 @@ import 'profile_provider.dart';
 // Use the correct relative path from /features/profile/
 import '../auth/auth_provider.dart';
 
+// 🔗 API + config to sync profile to backend
+import '../../config/app_config.dart';
+import '../../services/api_client.dart';
+import '../../services/profile_service.dart';
+
+/// Build an ApiClient using the current (optional) auth token.
+/// This mirrors the helper we use on HomeScreen.
+ApiClient _apiFromContext(BuildContext context) {
+  String? token;
+  try {
+    final auth = context.read<AuthProvider>();
+    final dyn = auth as dynamic;
+    token = (dyn.authToken ?? dyn.token) as String?;
+  } catch (_) {
+    token = null;
+  }
+  return ApiClient(baseUrl: AppConfig.apiBaseUrl, authToken: token);
+}
+
 class MyProfilePage extends StatefulWidget {
   const MyProfilePage({super.key});
 
@@ -49,11 +68,35 @@ class _MyProfilePageState extends State<MyProfilePage> {
   }
 
   Future<void> _saveName() async {
-    await context.read<ProfileProvider>().setDisplayName(_nameCtrl.text);
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Profile saved')));
+    final newName = _nameCtrl.text.trim();
+
+    // 1) Always update local profile provider (for avatar chip + My Profile).
+    await context.read<ProfileProvider>().setDisplayName(newName);
+
+    // 2) Try to sync the new name to the backend public profile.
+    try {
+      final api = _apiFromContext(context);
+      final svc = ProfileService(api);
+
+      // If user cleared the field, don't send an empty string; just skip.
+      if (newName.isNotEmpty) {
+        await svc.updateMyProfile(fullName: newName);
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Profile saved')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Profile saved locally, but failed to update online: $e',
+          ),
+        ),
+      );
+    }
   }
 
   @override

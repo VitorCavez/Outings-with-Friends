@@ -146,9 +146,10 @@ class _ItineraryTimelineState extends State<ItineraryTimeline> {
                     existing == null
                         ? 'Add itinerary item'
                         : 'Edit itinerary item',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
+                      color: cs.onSurface,
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -303,7 +304,10 @@ class _ItineraryTimelineState extends State<ItineraryTimeline> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete item?'),
-        content: Text('Remove “${item.title}” from the itinerary?'),
+        content: Text(
+          'Remove “${item.title}” from the itinerary?',
+          style: TextStyle(color: Theme.of(ctx).colorScheme.onSurface),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),

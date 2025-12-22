@@ -162,6 +162,12 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
     }
   }
 
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   void _recomputeCanEdit() {
     final details = _lastDetails;
     if (details == null) {
@@ -457,80 +463,74 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
     final cs = Theme.of(context).colorScheme;
     final ctl = TextEditingController();
 
-    try {
-      await showDialog<bool>(
-        context: context,
-        builder: (dialogCtx) => AlertDialog(
-          title: const Text('Invite people'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Enter emails or phone numbers (comma-separated).',
-                style: TextStyle(color: cs.onSurfaceVariant),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: ctl,
-                decoration: const InputDecoration(
-                  hintText: 'friend@example.com, +3538XXXXXXX',
-                ),
-                minLines: 1,
-                maxLines: 4,
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogCtx).pop(false),
-              child: const Text('Cancel'),
+    await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Invite people'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Enter emails or phone numbers (comma-separated).',
+              style: TextStyle(color: cs.onSurfaceVariant),
             ),
-            FilledButton(
-              onPressed: () async {
-                final raw = ctl.text.trim();
-                if (raw.isEmpty) {
-                  Navigator.of(dialogCtx).pop(false);
-                  return;
-                }
-                final contacts = raw
-                    .split(',')
-                    .map((s) => s.trim())
-                    .where((s) => s.isNotEmpty)
-                    .toList();
-                try {
-                  final resp = await _api.postJson(
-                    '/api/outings/${widget.outingId}/invites',
-                    {
-                      'contacts': contacts,
-                      'role': _ParticipantRole.PARTICIPANT,
-                    },
-                  );
-                  if (resp.statusCode == 201 || resp.statusCode == 200) {
-                    if (mounted) {
-                      ScaffoldMessenger.of(dialogCtx).showSnackBar(
-                        const SnackBar(content: Text('Invites sent')),
-                      );
-                    }
-                    setState(() => _changed = true);
-                    if (mounted) Navigator.of(dialogCtx).pop(true);
-                  } else {
-                    throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
-                  }
-                } catch (e) {
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(
-                    dialogCtx,
-                  ).showSnackBar(SnackBar(content: Text('Invite failed: $e')));
-                }
-              },
-              child: const Text('Send'),
+            const SizedBox(height: 8),
+            TextField(
+              controller: ctl,
+              decoration: const InputDecoration(
+                hintText: 'friend@example.com, +3538XXXXXXX',
+              ),
+              minLines: 1,
+              maxLines: 4,
             ),
           ],
         ),
-      );
-    } finally {
-      ctl.dispose();
-    }
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final raw = ctl.text.trim();
+              if (raw.isEmpty) {
+                Navigator.of(dialogCtx).pop(false);
+                return;
+              }
+              final contacts = raw
+                  .split(',')
+                  .map((s) => s.trim())
+                  .where((s) => s.isNotEmpty)
+                  .toList();
+              try {
+                final resp = await _api.postJson(
+                  '/api/outings/${widget.outingId}/invites',
+                  {'contacts': contacts, 'role': _ParticipantRole.PARTICIPANT},
+                );
+                if (resp.statusCode == 201 || resp.statusCode == 200) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(dialogCtx).showSnackBar(
+                      const SnackBar(content: Text('Invites sent')),
+                    );
+                  }
+                  setState(() => _changed = true);
+                  if (mounted) Navigator.of(dialogCtx).pop(true);
+                } else {
+                  throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
+                }
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(
+                  dialogCtx,
+                ).showSnackBar(SnackBar(content: Text('Invite failed: $e')));
+              }
+            },
+            child: const Text('Send'),
+          ),
+        ],
+      ),
+    );
+    // No manual dispose of ctl – it will be GC'd with the dialog subtree.
   }
 
   // -----------------------------
@@ -1043,8 +1043,9 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete contribution?'),
-        content: const Text(
+        content: Text(
           'This will remove your contribution from the Piggy Bank.',
+          style: TextStyle(color: cs.onSurface),
         ),
         actions: [
           TextButton(
@@ -1860,7 +1861,12 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                             children: [
                               Icon(Icons.event, color: cs.onSurfaceVariant),
                               const SizedBox(width: 6),
-                              Text(d.startsAt!.toLocal().toString()),
+                              Text(
+                                DateFormat(
+                                  'EEE, MMM d • HH:mm',
+                                ).format(d.startsAt!.toLocal()),
+                                style: TextStyle(color: cs.onSurface),
+                              ),
                             ],
                           ),
                         ],
