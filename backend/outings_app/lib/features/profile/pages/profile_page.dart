@@ -21,7 +21,7 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
-  late ProfileService _svc;
+  late final ProfileService _svc;
 
   bool _loadingHeader = false;
   UserProfile? _profile;
@@ -46,21 +46,6 @@ class _ProfilePageState extends State<ProfilePage> {
     super.initState();
     _svc = ProfileService(widget.api);
     _loadAll();
-  }
-
-  /// 🔁 If GoRouter reuses this page but the userId (or ApiClient) changes,
-  /// force a fresh load so we don't keep showing the previous user's data.
-  @override
-  void didUpdateWidget(covariant ProfilePage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.userId != widget.userId || oldWidget.api != widget.api) {
-      _svc = ProfileService(widget.api);
-      _profile = null;
-      _history = const [];
-      _favorites = const [];
-      _timeline = const [];
-      _loadAll();
-    }
   }
 
   Future<void> _loadAll() async {
@@ -126,15 +111,9 @@ class _ProfilePageState extends State<ProfilePage> {
       setState(() => _favorites = items);
     } catch (e) {
       if (!mounted) return;
-      final msg = '$e';
-      // If unauthorized, just show an empty favorites section without spamming errors.
-      if (msg.contains('401')) {
-        setState(() => _favorites = const []);
-      } else {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to load favorites: $e')));
-      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to load favorites: $e')));
     } finally {
       if (mounted) setState(() => _loadingFavorites = false);
     }
@@ -293,47 +272,61 @@ class _ProfilePageState extends State<ProfilePage> {
                   // Outing History (+ filter)
                   _Section(
                     title: 'Outing History',
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
+                    // ⬇️ segmented control now lives *inside* the body, full-width
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (_loadingHistory)
-                          const SizedBox(
-                            height: 18,
-                            width: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        const SizedBox(width: 8),
-                        // Prevent overflow on narrow screens
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 0),
-                          child: SegmentedButton<String>(
-                            segments: const [
-                              ButtonSegment(value: 'all', label: Text('All')),
-                              ButtonSegment(value: 'host', label: Text('Host')),
-                              ButtonSegment(
-                                value: 'guest',
-                                label: Text('Guest'),
+                        Row(
+                          children: [
+                            if (_loadingHistory)
+                              const SizedBox(
+                                height: 18,
+                                width: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               ),
-                            ],
-                            selected: {_historyRole},
-                            onSelectionChanged: (s) async {
-                              final next = s.first;
-                              setState(() => _historyRole = next);
-                              await _loadHistory();
-                            },
-                          ),
+                            if (_loadingHistory) const SizedBox(width: 8),
+                            // Take all remaining width and allow horizontal scroll
+                            Expanded(
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: SegmentedButton<String>(
+                                  segments: const [
+                                    ButtonSegment(
+                                      value: 'all',
+                                      label: Text('All'),
+                                    ),
+                                    ButtonSegment(
+                                      value: 'host',
+                                      label: Text('Host'),
+                                    ),
+                                    ButtonSegment(
+                                      value: 'guest',
+                                      label: Text('Guest'),
+                                    ),
+                                  ],
+                                  selected: {_historyRole},
+                                  onSelectionChanged: (s) async {
+                                    final next = s.first;
+                                    setState(() => _historyRole = next);
+                                    await _loadHistory();
+                                  },
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                    child: _loadingHistory
-                        ? const Padding(
+                        const SizedBox(height: 8),
+                        if (_loadingHistory)
+                          const Padding(
                             padding: EdgeInsets.symmetric(vertical: 4),
                             child: Text('Loading…'),
                           )
-                        : _history.isEmpty
-                        ? const Text('No past outings yet.')
-                        : ListView.separated(
+                        else if (_history.isEmpty)
+                          const Text('No past outings yet.')
+                        else
+                          ListView.separated(
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
                             itemCount: _history.length,
@@ -380,6 +373,8 @@ class _ProfilePageState extends State<ProfilePage> {
                               );
                             },
                           ),
+                      ],
+                    ),
                   ),
 
                   const SizedBox(height: 12),
