@@ -810,7 +810,7 @@ router.get('/:id/invites/sent', requireAuth, async (req, res) => {
   }
 });
 
-// Accept / decline an invite (also join group if present)
+// Accept / decline an invite (also join group if present + system message)
 router.patch('/invites/:inviteId', requireAuth, async (req, res) => {
   const { inviteId } = req.params;
   const userId = req.user?.userId;
@@ -833,7 +833,7 @@ router.patch('/invites/:inviteId', requireAuth, async (req, res) => {
 
     const me = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, email: true, phoneE164: true },
+      select: { id: true, email: true, phoneE164: true, fullName: true },
     });
     if (!me) return res.status(401).json({ error: 'AUTH_REQUIRED' });
 
@@ -862,7 +862,8 @@ router.patch('/invites/:inviteId', requireAuth, async (req, res) => {
 
     // If already processed, return as-is
     if (inv.status !== InviteStatusEnum.PENDING) {
-      return res.json({ ok: true, data: inv });
+      // keep shape so Flutter can still parse
+      return res.json({ ok: true, invite: inv });
     }
 
     if (actionRaw === 'DECLINE') {
@@ -873,11 +874,11 @@ router.patch('/invites/:inviteId', requireAuth, async (req, res) => {
           ...(inv.inviteeUserId ? {} : { inviteeUserId: userId }),
         },
       });
-      return res.json({ ok: true, data: declined });
+      return res.json({ ok: true, invite: declined });
     }
 
     // ACCEPT
-    const accepted = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const updated = await tx.outingInvite.update({
         where: { id: inviteId },
         data: {
@@ -886,6 +887,7 @@ router.patch('/invites/:inviteId', requireAuth, async (req, res) => {
         },
       });
 
+      // Add as OutingParticipant
       await tx.outingParticipant.upsert({
         where: {
           outingId_userId: { outingId: updated.outingId, userId },
@@ -898,12 +900,15 @@ router.patch('/invites/:inviteId', requireAuth, async (req, res) => {
         update: { role: updated.role || 'PARTICIPANT' },
       });
 
-      // 👇 also add to the outing's group if there is one
+      // Also add to the outing's group if there is one
       const o = await tx.outing.findUnique({
         where: { id: updated.outingId },
         select: { groupId: true },
       });
+
+      let systemMessage = null;
       if (o?.groupId) {
+        // Ensure group membership for the invitee
         await tx.groupMembership.upsert({
           where: { userId_groupId: { userId, groupId: o.groupId } },
           update: { role: GroupRole.member, isAdmin: false },
@@ -914,12 +919,72 @@ router.patch('/invites/:inviteId', requireAuth, async (req, res) => {
             isAdmin: false,
           },
         });
+
+        // Create an automatic "invite accepted" message in the group chat
+        const text =
+          `${me.fullName || 'Someone'} accepted the outing invitation`;
+
+        systemMessage = await tx.message.create({
+          data: {
+            text,
+            senderId: userId,
+            groupId: o.groupId,
+            recipientId: null,
+            isRead: false,
+            messageType: 'text',
+          },
+          select: {
+            id: true,
+            text: true,
+            senderId: true,
+            recipientId: true,
+            groupId: true,
+            createdAt: true,
+            isRead: true,
+            messageType: true,
+            mediaUrl: true,
+            fileName: true,
+            fileSize: true,
+            readAt: true,
+          },
+        });
+
+        return {
+          invite: updated,
+          groupId: o.groupId,
+          systemMessage,
+        };
       }
 
-      return updated;
+      // No group attached to this outing
+      return { invite: updated, groupId: null, systemMessage: null };
     });
 
-    return res.json({ ok: true, data: accepted });
+    // 🚀 Broadcast the system message over Socket.IO so both users see it
+    try {
+      const io = req.app.get('io');
+      if (io && result.groupId && result.systemMessage) {
+        io.to(`group:${result.groupId}`).emit('receive_message', {
+          id: result.systemMessage.id,
+          text: result.systemMessage.text,
+          senderId: result.systemMessage.senderId,
+          recipientId: result.systemMessage.recipientId,
+          groupId: result.systemMessage.groupId,
+          createdAt: result.systemMessage.createdAt,
+          isRead: result.systemMessage.isRead,
+          messageType: result.systemMessage.messageType,
+          mediaUrl: result.systemMessage.mediaUrl,
+          fileName: result.systemMessage.fileName,
+          fileSize: result.systemMessage.fileSize,
+          readAt: result.systemMessage.readAt,
+        });
+      }
+    } catch (emitErr) {
+      console.warn('Socket emit failed for invite accept:', emitErr?.message || emitErr);
+    }
+
+    // Keep response shape compatible with the Flutter OutingShareService
+    return res.json({ ok: true, invite: result.invite });
   } catch (e) {
     console.error('update invite error:', e);
     return res.status(500).json({ error: 'Internal server error' });
