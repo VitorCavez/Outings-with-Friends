@@ -31,6 +31,92 @@ function cryptoRandom() {
 }
 
 /**
+ * Small helper to drop a “X joined Y” system-like message into the group
+ * and broadcast it via Socket.IO so both members see the thread appear.
+ */
+async function sendJoinSystemMessage({ req, groupId, userId }) {
+  try {
+    if (!groupId || !userId) return;
+
+    // Try to make the text a bit friendlier: use user fullName/username and group name
+    const [user, group] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: { fullName: true, username: true },
+      }),
+      prisma.group.findUnique({
+        where: { id: groupId },
+        select: { name: true },
+      }),
+    ]);
+
+    const displayName =
+      user?.fullName ||
+      user?.username ||
+      'Someone';
+
+    const groupName = group?.name || 'this group';
+
+    const text = `${displayName} joined ${groupName}`;
+
+    // Persist message (same shape as socket handler in index.js)
+    const saved = await prisma.message.create({
+      data: {
+        text,
+        senderId: userId,
+        recipientId: null,
+        groupId,
+        messageType: 'text',
+        mediaUrl: null,
+        fileName: null,
+        fileSize: null,
+      },
+      select: {
+        id: true,
+        text: true,
+        senderId: true,
+        recipientId: true,
+        groupId: true,
+        createdAt: true,
+        isRead: true,
+        messageType: true,
+        mediaUrl: true,
+        fileName: true,
+        fileSize: true,
+        readAt: true,
+      },
+    });
+
+    const io = req.app?.get('io');
+    if (!io || !saved.groupId) return;
+
+    const payload = {
+      id: saved.id,
+      text: saved.text,
+      senderId: saved.senderId,
+      recipientId: saved.recipientId,
+      groupId: saved.groupId,
+      createdAt: saved.createdAt,
+      isRead: saved.isRead ?? false,
+      messageType: saved.messageType || 'text',
+      mediaUrl: saved.mediaUrl || null,
+      fileName: saved.fileName || null,
+      fileSize: saved.fileSize || null,
+      readAt: saved.readAt || null,
+    };
+
+    // Mirror the behaviour from index.js:
+    // - emit to group room
+    // - echo to sender's user room so their client updates too
+    io.to(`group:${saved.groupId}`).emit('receive_message', payload);
+    io.to(`user:${saved.senderId}`).emit('receive_message', payload);
+  } catch (err) {
+    console.error('sendJoinSystemMessage error:', err);
+    // Non-fatal: do not break invite acceptance if this fails
+  }
+}
+
+/**
  * POST /api/groups/:groupId/invites
  * Body: { inviteeUserId?, inviteeEmail?, message?, expiresAt? }
  */
@@ -145,6 +231,7 @@ exports.listMyInvites = async (req, res) => {
 /**
  * POST /api/groups/invites/:inviteId/accept
  * If valid → adds membership (role: member) and marks invite accepted.
+ * Now also drops a “X joined Y” message into the group chat.
  */
 exports.acceptInvite = async (req, res) => {
   try {
@@ -177,6 +264,14 @@ exports.acceptInvite = async (req, res) => {
     const updated = await prisma.groupInvite.update({
       where: { id: inviteId },
       data: { status: 'accepted', acceptedAt: new Date() },
+    });
+
+    // 🔔 New: emit a “joined” message into the group chat so everyone
+    // (including the group creator) immediately sees this thread.
+    await sendJoinSystemMessage({
+      req,
+      groupId: invite.groupId,
+      userId: me,
     });
 
     return res.json({ ok: true, data: updated });

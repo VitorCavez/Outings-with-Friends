@@ -44,10 +44,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
 
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Registration successful')));
-      context.go('/home');
+
+      // ✅ Inform the user and send them to the Login screen
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Account created! Please log in.')),
+      );
+
+      // Go directly to login instead of home
+      context.go('/login');
     } on Exception catch (e) {
       setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
     } catch (_) {
@@ -104,7 +108,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   : const Text('Register'),
             ),
             TextButton(
-              onPressed: _busy ? null : () => context.go('/'),
+              // ✅ Go straight to the login screen
+              onPressed: _busy ? null : () => context.go('/login'),
               child: const Text('Already have an account? Login'),
             ),
           ],

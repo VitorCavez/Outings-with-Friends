@@ -68,6 +68,11 @@ class AuthApi {
   /// POST /api/auth/register  (fallback: /auth/register)
   /// Accepts { fullName, email, password }
   /// Returns AuthResult(token, userId)
+  ///
+  /// New behaviour:
+  /// - If the register response includes a token, use it (old behaviour).
+  /// - If it does NOT include a token but is 2xx, immediately call `login`
+  ///   with the same credentials to obtain token + userId.
   Future<AuthResult> register({
     required String fullName,
     required String email,
@@ -93,14 +98,27 @@ class AuthApi {
       );
     }
 
-    _throwOnNon2xx(res, defaultMsg: 'Registration failed');
-
-    final body = _decodeBodyAsMap(res.body);
-    final token = _firstString(body, const ['token', 'jwt', 'accessToken']);
-    if (token == null || token.isEmpty) {
-      throw Exception('Malformed response from server (missing token).');
+    // If email is already taken, surface a clear message.
+    if (res.statusCode == 409) {
+      _throwOnNon2xx(res, defaultMsg: 'Email already in use.');
     }
 
+    // For any other non-2xx, let the existing helper throw a detailed error.
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      _throwOnNon2xx(res, defaultMsg: 'Registration failed');
+    }
+
+    // Try to read a token from the register response, like before.
+    final body = _decodeBodyAsMap(res.body);
+    final token = _firstString(body, const ['token', 'jwt', 'accessToken']);
+
+    if (token == null || token.isEmpty) {
+      // ✅ Backend created the user but didn't return a token.
+      // Immediately log in with the same credentials to get token + userId.
+      return login(email: email, password: password, timeout: timeout);
+    }
+
+    // Same userId logic as in login()
     String? userId =
         _firstString(body, const ['userId']) ??
         _firstString(body['user'] as Map<String, dynamic>?, const ['id']) ??

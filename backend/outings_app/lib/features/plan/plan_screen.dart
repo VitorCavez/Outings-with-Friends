@@ -49,8 +49,12 @@ class PlanScreen extends StatefulWidget {
   State<PlanScreen> createState() => _PlanScreenState();
 }
 
-class _PlanScreenState extends State<PlanScreen> {
+class _PlanScreenState extends State<PlanScreen>
+    with SingleTickerProviderStateMixin {
   late final OutingShareService _svc;
+
+  // Tab controller so we can refresh when user switches tabs
+  late final TabController _tabController;
 
   // Data
   List<OutingLite> _mine = const [];
@@ -77,6 +81,36 @@ class _PlanScreenState extends State<PlanScreen> {
   void initState() {
     super.initState();
     _svc = OutingShareService(_apiFromContext(context));
+
+    _tabController = TabController(length: 4, vsync: this);
+    _tabController.addListener(_onTabChanged);
+  }
+
+  @override
+  void dispose() {
+    _tabController.removeListener(_onTabChanged);
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  void _onTabChanged() {
+    // Only react when the tab change animation is finished
+    if (_tabController.indexIsChanging) return;
+
+    switch (_tabController.index) {
+      case 0:
+        _loadMine();
+        break;
+      case 1:
+        _loadShared();
+        break;
+      case 2:
+        _loadInvites();
+        break;
+      case 3:
+        _loadSent();
+        break;
+    }
   }
 
   @override
@@ -86,7 +120,7 @@ class _PlanScreenState extends State<PlanScreen> {
     final token = (auth.authToken ?? auth.token ?? '').trim();
 
     debugPrint(
-      '📡 Plan.didChangeDependencies isLoggedIn=${auth.isLoggedIn} tokenLen=${token.length} initialFetchStarted=$_initialFetchStarted',
+      '📡 Plan.didChangeDependencies isLoggedIn=${auth.isLoggedIn} tokenLen=$token.length initialFetchStarted=$_initialFetchStarted',
     );
 
     if (!_initialFetchStarted && auth.isLoggedIn && token.isNotEmpty) {
@@ -121,17 +155,27 @@ class _PlanScreenState extends State<PlanScreen> {
 
   // Friendly-name helpers for invites/sent
   String _displayForInvitee(OutingInvite inv, DisplayNameResolver r) {
+    // 1) If we know the user ID, ask resolver for a friendly name
     if ((inv.inviteeUserId ?? '').isNotEmpty) {
-      return r.forUserId(
-        inv.inviteeUserId!,
-        fallback: 'user:${inv.inviteeUserId}',
-      );
+      final friendly = r.forUserId(inv.inviteeUserId!, fallback: '').trim();
+      if (friendly.isNotEmpty) return friendly;
     }
-    return inv.inviteeContact ?? '—';
+
+    // 2) Fall back to the contact string (email / phone)
+    final contact = (inv.inviteeContact ?? '').trim();
+    if (contact.isNotEmpty) return contact;
+
+    // 3) Last resort: short, non-ugly label instead of raw UUID
+    final id = (inv.inviteeUserId ?? '').trim();
+    if (id.length >= 6) return 'Friend ${id.substring(0, 6)}';
+    if (id.isNotEmpty) return 'Friend $id';
+    return 'Unknown person';
   }
 
   String _displayForInviter(OutingInvite inv, DisplayNameResolver r) {
-    return r.forUserId(inv.inviterId, fallback: inv.inviterId);
+    final friendly = r.forUserId(inv.inviterId, fallback: '').trim();
+    if (friendly.isNotEmpty) return friendly;
+    return 'Friend';
   }
 
   String _initialsForUserOrContact({
@@ -446,43 +490,39 @@ class _PlanScreenState extends State<PlanScreen> {
       return const Center(child: Text('Please log in to see your outings.'));
     }
 
-    return DefaultTabController(
-      length: 4,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Plan'),
-          actions: [
-            IconButton(
-              tooltip: 'Create Outing',
-              icon: const Icon(Icons.add),
-              onPressed: () async {
-                final created = await context.push<bool>('/plan/create');
-                if (created == true) await _loadMine();
-              },
-            ),
-            IconButton(
-              tooltip: 'My Outings',
-              icon: const Icon(Icons.list_alt),
-              onPressed: () => context.push('/my-outings'),
-            ),
-          ],
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'My Outings'),
-              Tab(text: 'Shared with Me'),
-              Tab(text: 'Invites'),
-              Tab(text: 'Sent'),
-            ],
+    final cs = Theme.of(context).colorScheme;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Plan'),
+        actions: [
+          IconButton(
+            tooltip: 'Create Outing',
+            icon: const Icon(Icons.add),
+            onPressed: () async {
+              final created = await context.push<bool>('/plan/create');
+              if (created == true) await _loadMine();
+            },
           ),
-        ),
-        body: TabBarView(
-          children: [
-            _buildMine(),
-            _buildShared(),
-            _buildInvites(),
-            _buildSent(),
+          IconButton(
+            tooltip: 'My Outings',
+            icon: const Icon(Icons.list_alt),
+            onPressed: () => context.push('/my-outings'),
+          ),
+        ],
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: 'My Outings'),
+            Tab(text: 'Shared with Me'),
+            Tab(text: 'Invites'),
+            Tab(text: 'Sent'),
           ],
         ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [_buildMine(), _buildShared(), _buildInvites(), _buildSent()],
       ),
     );
   }

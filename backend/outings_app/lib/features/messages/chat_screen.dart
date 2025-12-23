@@ -73,12 +73,33 @@ class _ChatScreenState extends State<ChatScreen> {
     if (gid == null) return;
     try {
       final svc = GroupService(_api());
-      final g = await svc.getGroup(gid); // tolerates {ok,data} or raw
+      final raw = await svc.getGroup(gid); // tolerates {ok,data} or raw
+
+      // Normalise the result into a Map<String, dynamic>
+      Map<String, dynamic> map;
+      if (raw is Map<String, dynamic>) {
+        final inner =
+            (raw['group'] ?? raw['data'] ?? raw) as Map<String, dynamic>? ??
+            <String, dynamic>{};
+        map = inner;
+      } else {
+        map = <String, dynamic>{};
+      }
+
+      final title = _firstNonEmpty([
+        map['name'],
+        map['title'],
+        map['displayName'],
+        map['outingTitle'],
+      ]);
+
       setState(() {
-        _groupTitle = (g['name'] as String?) ?? gid;
+        _groupTitle = (title != null && title.trim().isNotEmpty)
+            ? title.trim()
+            : 'Group chat';
       });
     } catch (_) {
-      setState(() => _groupTitle = gid);
+      setState(() => _groupTitle = 'Group chat');
     }
   }
 
@@ -561,10 +582,16 @@ class _ChatScreenState extends State<ChatScreen> {
 
     // Resolve friendly name
     final resolver = DisplayNameResolver.of(context);
-    final peerIdOrGroup = chat.peerUserId ?? chat.groupId ?? 'Chat';
-    final peerName = (chat.peerUserId != null)
-        ? resolver.forUserId(chat.peerUserId!, fallback: peerIdOrGroup)
-        : (_groupTitle ?? peerIdOrGroup);
+    String title;
+    if (chat.peerUserId != null) {
+      // Direct message → prefer contact/profile name
+      title = resolver.forUserId(chat.peerUserId!, fallback: 'Conversation');
+    } else if (chat.groupId != null) {
+      // Group chat → use loaded group title
+      title = _groupTitle ?? 'Group chat';
+    } else {
+      title = 'Chat';
+    }
 
     final unread = _unreadCount(messages);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
@@ -584,7 +611,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     : c.outlineVariant,
               ),
             if (showPresenceDot) const SizedBox(width: 6),
-            Expanded(child: Text(peerName, overflow: TextOverflow.ellipsis)),
+            Expanded(child: Text(title, overflow: TextOverflow.ellipsis)),
             const SizedBox(width: 8),
             if (chat.typingPeer)
               Text(
@@ -797,5 +824,14 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
     );
+  }
+
+  static String? _firstNonEmpty(List<dynamic> xs) {
+    for (final x in xs) {
+      if (x == null) continue;
+      final s = x.toString().trim();
+      if (s.isNotEmpty) return s;
+    }
+    return null;
   }
 }

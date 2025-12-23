@@ -15,6 +15,7 @@ import '../../../services/messages_service.dart';
 import 'package:outings_app/theme/app_theme.dart';
 
 /// Shows both DM and Group recent threads.
+///
 /// Data source priority:
 ///  1) Live from /api/messages/recent (auth via JWT; no userId param)
 ///  2) Fallback to local unified cache (MessagesRepository.recentThreads)
@@ -34,8 +35,7 @@ class _RecentChatsListState extends State<RecentChatsList> {
   @override
   void initState() {
     super.initState();
-    // Re-fetch when the repo cache changes (e.g., after sending a message)
-    // Post-frame to avoid setState during another subtree's build.
+    // Re-fetch when the repo cache changes (e.g., after sending/receiving a message)
     _repo.revision.addListener(_onRepoRevision);
     _refresh();
   }
@@ -76,30 +76,123 @@ class _RecentChatsListState extends State<RecentChatsList> {
       // Backend uses JWT via requireAuth
       final list = await svc.fetchRecent(limit: 40);
 
-      // Ensure safe map shape
+      // Ensure safe map shape + normalize fields
       final parsed = list
           .whereType<Map>()
           .map((e) => Map<String, dynamic>.from(e as Map))
+          .map(_normalizeThread)
           .toList();
 
-      if (mounted) {
-        setState(() {
-          _threads = parsed;
-          _loading = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _threads = parsed;
+        _loading = false;
+      });
       return;
     } catch (e) {
       // Fallback to local unified cache so the page isn't empty offline
       final fallback = _buildUnifiedFallback(_repo);
-      if (mounted) {
-        setState(() {
-          _threads = fallback;
-          _loading = false;
-          _error = e;
-        });
+      if (!mounted) return;
+      setState(() {
+        _threads = fallback;
+        _loading = false;
+        _error = e;
+      });
+    }
+  }
+
+  /// Normalize one thread into a consistent shape so the UI doesn’t
+  /// depend on the exact backend JSON.
+  ///
+  /// Ensures:
+  ///   kind: 'dm' | 'group'
+  ///   peerId / groupId
+  ///   title
+  ///   lastText
+  ///   lastAt
+  Map<String, dynamic> _normalizeThread(Map<String, dynamic> t) {
+    final out = Map<String, dynamic>.from(t);
+
+    // ---- kind ----
+    String kind = (t['kind'] ?? '').toString();
+    if (kind.isEmpty) {
+      // Heuristic: if there is any groupId, treat as group; otherwise DM
+      final gId = t['groupId'] ?? t['group_id'];
+      kind = (gId != null && gId.toString().isNotEmpty) ? 'group' : 'dm';
+    }
+    out['kind'] = kind;
+
+    // ---- DM threads ----
+    if (kind == 'dm') {
+      final peer =
+          (t['peer'] ??
+                  t['user'] ??
+                  t['otherUser'] ??
+                  t['participant'] ??
+                  t['member'])
+              as Map<String, dynamic>?;
+
+      String? peerId = t['peerId']?.toString();
+      if (peer != null && peerId == null) {
+        peerId = peer['id']?.toString();
+      }
+      out['peerId'] = peerId;
+
+      final title = _firstNonEmpty([
+        peer?['displayName'],
+        peer?['fullName'],
+        peer?['name'],
+        peer?['username'],
+        t['displayName'],
+        t['title'],
+      ]);
+
+      if (title != null && title.trim().isNotEmpty) {
+        out['title'] = title.trim();
+      } else if (peerId != null) {
+        out['title'] = peerId;
+      }
+    } else {
+      // ---- Group threads ----
+      final group =
+          (t['group'] ?? t['room'] ?? t['chat']) as Map<String, dynamic>?;
+
+      String? groupId = t['groupId']?.toString();
+      if (group != null && groupId == null) {
+        groupId = group['id']?.toString();
+      }
+      out['groupId'] = groupId;
+
+      final title = _firstNonEmpty([
+        group?['name'],
+        group?['title'],
+        group?['displayName'],
+        t['title'],
+      ]);
+
+      if (title != null && title.trim().isNotEmpty) {
+        out['title'] = title.trim();
+      } else if (groupId != null) {
+        out['title'] = 'Group $groupId';
       }
     }
+
+    // ---- lastAt ----
+    final rawLast =
+        t['lastAt'] ?? t['last_at'] ?? t['updatedAt'] ?? t['createdAt'];
+    out['lastAt'] = rawLast;
+
+    // ---- lastText ----
+    final lastMessage = t['lastMessage'];
+    out['lastText'] =
+        _firstNonEmpty([
+          t['lastText'],
+          t['lastMessageText'],
+          lastMessage is Map<String, dynamic> ? lastMessage['text'] : null,
+        ]) ??
+        '';
+
+    return out;
   }
 
   /// Build a unified (DM + Group) fallback from the local cache.
@@ -122,7 +215,7 @@ class _RecentChatsListState extends State<RecentChatsList> {
           'kind': 'group',
           'peerId': null,
           'groupId': t.groupId,
-          // We don't know the group name here; use groupId for now.
+          // We might not know the group name here; use groupId for now.
           'title': t.groupId,
           'avatarUrl': null,
           'lastText': last.text,
@@ -179,6 +272,8 @@ class _RecentChatsListState extends State<RecentChatsList> {
             lastAt = DateTime.tryParse(raw);
           } else if (raw is int) {
             lastAt = DateTime.fromMillisecondsSinceEpoch(raw);
+          } else if (raw is DateTime) {
+            lastAt = raw;
           }
           return {...t, 'lastAt': lastAt ?? DateTime.now()};
         }).toList()..sort(
@@ -272,12 +367,25 @@ class _RecentChatsListState extends State<RecentChatsList> {
   }
 
   static String _initialsFrom(String s) {
-    final words = s.trim().split(RegExp(r'\s+'));
+    final words = s
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .toList();
     if (words.isEmpty) return '🙂';
     if (words.length == 1) {
       final w = words.first;
       return w.length >= 2 ? w.substring(0, 2).toUpperCase() : w.toUpperCase();
     }
     return (words[0][0] + words[1][0]).toUpperCase();
+  }
+
+  static String? _firstNonEmpty(List<dynamic> candidates) {
+    for (final c in candidates) {
+      if (c == null) continue;
+      final s = c.toString().trim();
+      if (s.isNotEmpty) return s;
+    }
+    return null;
   }
 }
