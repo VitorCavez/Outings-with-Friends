@@ -160,7 +160,7 @@ async function ensureOutingGroup(outingId, organizerId) {
   if (!groupId) {
     const group = await prisma.group.create({
       data: {
-        name: `${outing.title || 'Outing'} chat`,
+        name: `${outing.title || 'Outing chat'} chat`,
         description: null,
         visibility: 'private',
         createdById: ownerId,
@@ -251,7 +251,7 @@ router.get('/dev/coords-debug', async (req, res) => {
     res.json({ ok: true, rows });
   } catch (e) {
     console.error('coords-debug error:', e);
-    res.status(500).json({ ok: true, error: e.message });
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
@@ -543,12 +543,20 @@ router.post('/:id/invites', requireAuth, async (req, res) => {
     // Ensure outing exists
     const outing = await prisma.outing.findUnique({
       where: { id },
-      select: { id: true, title: true, createdById: true, groupId: true },
+      select: { id: true, title: true, createdById: true },
     });
     if (!outing) return res.status(404).json({ error: 'Outing not found' });
 
-    // ⭐ Ensure there is a group for this outing and inviter is admin
-    const groupId = await ensureOutingGroup(outing.id, inviterId);
+    // 🔗 Ensure there is a group for this outing (creates if missing)
+    let groupId;
+    try {
+      groupId = await ensureOutingGroup(outing.id, outing.createdById);
+    } catch (err) {
+      console.error('ensureOutingGroup (invites) failed:', err);
+      return res
+        .status(500)
+        .json({ error: 'Failed to prepare group chat for outing' });
+    }
 
     // Collect invitees
     const {
@@ -889,6 +897,18 @@ router.patch('/invites/:inviteId', requireAuth, async (req, res) => {
     }
 
     // ACCEPT
+    // First, ensure a group exists for this outing (creates if missing)
+    let ensuredGroupId = null;
+    try {
+      ensuredGroupId = await ensureOutingGroup(
+        inv.outing.id,
+        inv.outing.createdById,
+      );
+    } catch (err) {
+      console.error('ensureOutingGroup (invite accept) failed:', err);
+      // We'll still proceed with accepting, just without group chat wiring
+    }
+
     const result = await prisma.$transaction(async (tx) => {
       const updated = await tx.outingInvite.update({
         where: { id: inviteId },
@@ -911,27 +931,21 @@ router.patch('/invites/:inviteId', requireAuth, async (req, res) => {
         update: { role: updated.role || 'PARTICIPANT' },
       });
 
-      // Also add to the outing's group if there is one
-      const o = await tx.outing.findUnique({
-        where: { id: updated.outingId },
-        select: { groupId: true },
-      });
-
       let systemMessage = null;
-      if (o?.groupId) {
-        // Ensure group membership for the invitee
+
+      // If we have a group, ensure membership + create system message
+      if (ensuredGroupId) {
         await tx.groupMembership.upsert({
-          where: { userId_groupId: { userId, groupId: o.groupId } },
+          where: { userId_groupId: { userId, groupId: ensuredGroupId } },
           update: { role: GroupRole.member, isAdmin: false },
           create: {
             userId,
-            groupId: o.groupId,
+            groupId: ensuredGroupId,
             role: GroupRole.member,
             isAdmin: false,
           },
         });
 
-        // Create an automatic "invite accepted" message in the group chat
         const text =
           `${me.fullName || 'Someone'} accepted the outing invitation`;
 
@@ -939,7 +953,7 @@ router.patch('/invites/:inviteId', requireAuth, async (req, res) => {
           data: {
             text,
             senderId: userId,
-            groupId: o.groupId,
+            groupId: ensuredGroupId,
             recipientId: null,
             isRead: false,
             messageType: 'text',
@@ -959,16 +973,13 @@ router.patch('/invites/:inviteId', requireAuth, async (req, res) => {
             readAt: true,
           },
         });
-
-        return {
-          invite: updated,
-          groupId: o.groupId,
-          systemMessage,
-        };
       }
 
-      // No group attached to this outing
-      return { invite: updated, groupId: null, systemMessage: null };
+      return {
+        invite: updated,
+        groupId: ensuredGroupId,
+        systemMessage,
+      };
     });
 
     // 🚀 Broadcast the system message over Socket.IO so both users see it
@@ -991,7 +1002,10 @@ router.patch('/invites/:inviteId', requireAuth, async (req, res) => {
         });
       }
     } catch (emitErr) {
-      console.warn('Socket emit failed for invite accept:', emitErr?.message || emitErr);
+      console.warn(
+        'Socket emit failed for invite accept:',
+        emitErr?.message || emitErr,
+      );
     }
 
     // Keep response shape compatible with the Flutter OutingShareService
