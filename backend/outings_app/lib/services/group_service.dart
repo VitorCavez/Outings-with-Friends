@@ -207,6 +207,27 @@ class GroupService {
     }
   }
 
+  /// POST /api/groups/:groupId/leave
+  ///
+  /// Lets the current user leave a group. The backend may respond with
+  /// specific error codes such as `LAST_ADMIN_CANNOT_LEAVE`; we surface
+  /// that in the thrown exception message so the UI can show something
+  /// friendly.
+  Future<void> leaveGroup(String groupId) async {
+    final r = await api.postJson('/api/groups/$groupId/leave', {});
+    if (r.statusCode != 200) {
+      try {
+        final body = jsonDecode(r.body);
+        if (body is Map && body['error'] != null) {
+          throw Exception('Leave group failed: ${body['error']}');
+        }
+      } catch (_) {
+        // fall through to generic error
+      }
+      throw Exception('Leave group failed (${r.statusCode})');
+    }
+  }
+
   /// Optional: POST /api/groups/:groupId/members/:userId/pin { pinned: bool }
   Future<void> setMemberPinned(
     String groupId,

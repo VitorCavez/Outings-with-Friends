@@ -140,6 +140,59 @@ async function isContactEitherDirection(a, b) {
   return !!row;
 }
 
+// Ensure an outing has a linked Group + creator is admin.
+// Returns the groupId.
+async function ensureOutingGroup(outingId, organizerId) {
+  // Fetch outing with current groupId
+  const outing = await prisma.outing.findUnique({
+    where: { id: outingId },
+    select: { id: true, title: true, createdById: true, groupId: true },
+  });
+
+  if (!outing) {
+    throw new Error(`OUTING_NOT_FOUND:${outingId}`);
+  }
+
+  const ownerId = organizerId || outing.createdById;
+  let groupId = outing.groupId;
+
+  // Create group if missing
+  if (!groupId) {
+    const group = await prisma.group.create({
+      data: {
+        name: `${outing.title || 'Outing'} chat`,
+        description: null,
+        visibility: 'private',
+        createdById: ownerId,
+      },
+    });
+
+    groupId = group.id;
+
+    // Link outing → group
+    await prisma.outing.update({
+      where: { id: outing.id },
+      data: { groupId },
+    });
+  }
+
+  // Make sure owner is admin member (idempotent)
+  await prisma.groupMembership.upsert({
+    where: {
+      userId_groupId: { userId: ownerId, groupId },
+    },
+    update: { role: GroupRole.admin, isAdmin: true },
+    create: {
+      userId: ownerId,
+      groupId,
+      role: GroupRole.admin,
+      isAdmin: true,
+    },
+  });
+
+  return groupId;
+}
+
 /* viewer checks */
 async function canViewOuting(outing, viewerId) {
   if (!outing) return false;
@@ -198,7 +251,7 @@ router.get('/dev/coords-debug', async (req, res) => {
     res.json({ ok: true, rows });
   } catch (e) {
     console.error('coords-debug error:', e);
-    res.status(500).json({ ok: false, error: e.message });
+    res.status(500).json({ ok: true, error: e.message });
   }
 });
 
@@ -466,7 +519,14 @@ router.patch('/:id/publish', requireAuth, async (req, res) => {
       update: { role: 'OWNER' },
     });
 
-    res.json({ ok: true, data: updated });
+    // ⭐ guarantee a group chat exists for this outing + creator is admin
+    try {
+      const groupId = await ensureOutingGroup(id, userId);
+      return res.json({ ok: true, data: { ...updated, groupId } });
+    } catch (err) {
+      console.error('ensureOutingGroup (publish) failed:', err);
+      return res.json({ ok: true, data: updated });
+    }
   } catch (e) {
     console.error('Publish outing error:', e);
     res.status(500).json({ error: 'Internal error' });
@@ -480,64 +540,15 @@ router.post('/:id/invites', requireAuth, async (req, res) => {
     const own = await assertOwner(id, inviterId);
     if (!own.ok) return res.status(own.code).json({ error: own.msg });
 
-    // Ensure outing exists + load title & groupId
-    let outing = await prisma.outing.findUnique({
+    // Ensure outing exists
+    const outing = await prisma.outing.findUnique({
       where: { id },
       select: { id: true, title: true, createdById: true, groupId: true },
     });
     if (!outing) return res.status(404).json({ error: 'Outing not found' });
 
-    // 🔗 Ensure there is a group for this outing
-    if (!outing.groupId) {
-      const group = await prisma.$transaction(async (tx) => {
-        const newGroup = await tx.group.create({
-          data: {
-            name: `${outing.title} chat`,
-            description: null,
-            visibility: 'private',
-            createdById: inviterId,
-          },
-        });
-
-        // creator as admin
-        await tx.groupMembership.upsert({
-          where: {
-            userId_groupId: { userId: inviterId, groupId: newGroup.id },
-          },
-          update: { role: GroupRole.admin, isAdmin: true },
-          create: {
-            userId: inviterId,
-            groupId: newGroup.id,
-            role: GroupRole.admin,
-            isAdmin: true,
-          },
-        });
-
-        // link group to outing
-        await tx.outing.update({
-          where: { id: outing.id },
-          data: { groupId: newGroup.id },
-        });
-
-        return newGroup;
-      });
-
-      outing = { ...outing, groupId: group.id };
-    } else {
-      // make sure creator is admin (idempotent)
-      await prisma.groupMembership.upsert({
-        where: {
-          userId_groupId: { userId: inviterId, groupId: outing.groupId },
-        },
-        update: { role: GroupRole.admin, isAdmin: true },
-        create: {
-          userId: inviterId,
-          groupId: outing.groupId,
-          role: GroupRole.admin,
-          isAdmin: true,
-        },
-      });
-    }
+    // ⭐ Ensure there is a group for this outing and inviter is admin
+    const groupId = await ensureOutingGroup(outing.id, inviterId);
 
     // Collect invitees
     const {
@@ -665,7 +676,7 @@ router.post('/:id/invites', requireAuth, async (req, res) => {
 
     return res
       .status(201)
-      .json({ ok: true, invites: created, linkedGroupId: outing.groupId });
+      .json({ ok: true, invites: created, linkedGroupId: groupId });
   } catch (e) {
     console.error('create invites error:', e);
     return res.status(500).json({ error: e.message || 'Internal error' });

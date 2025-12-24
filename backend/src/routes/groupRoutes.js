@@ -481,4 +481,36 @@ router.delete('/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Leave (or effectively "delete for me") a group.
+// If it was the last member, the group record is removed.
+router.post('/:groupId/leave', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    const { groupId } = req.params;
+
+    if (!userId) return res.status(401).json({ error: 'AUTH_REQUIRED' });
+
+    const membership = await prisma.groupMembership.findFirst({
+      where: { userId, groupId },
+    });
+
+    if (!membership) {
+      return res.status(404).json({ error: 'NOT_A_MEMBER' });
+    }
+
+    await prisma.groupMembership.delete({ where: { id: membership.id } });
+
+    // Optional: if group is now empty, delete it entirely
+    const remaining = await prisma.groupMembership.count({ where: { groupId } });
+    if (remaining === 0) {
+      await prisma.group.delete({ where: { id: groupId } });
+    }
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('leave group error:', err);
+    return res.status(500).json({ error: 'SERVER_ERROR' });
+  }
+});
+
 module.exports = router;

@@ -127,6 +127,68 @@ class _GroupsScreenState extends State<GroupsScreen> {
     context.go('/messages/group/$groupId');
   }
 
+  Future<void> _confirmAndLeaveGroup(Map<String, dynamic> group) async {
+    final scheme = Theme.of(context).colorScheme;
+    final name = (group['name'] ?? 'this group').toString();
+    final id = (group['id'] ?? group['groupId']).toString();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Leave group'),
+        content: Text(
+          'Are you sure you want to leave "$name"? '
+          'You will no longer see messages from this group.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Leave'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final svc = GroupService(_buildApi());
+      await svc.leaveGroup(id);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('You left "$name".'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      final raw = e.toString();
+      String message = raw;
+
+      // Friendly message for the special backend error
+      if (raw.contains('LAST_ADMIN_CANNOT_LEAVE')) {
+        message =
+            'You are the last admin in this group. Promote another member to '
+            'admin or delete the group before leaving.';
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: scheme.errorContainer,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -245,6 +307,28 @@ class _GroupsScreenState extends State<GroupsScreen> {
                           overflow: TextOverflow.ellipsis,
                         ),
                   onTap: () => _openGroupChat(id),
+                  trailing: PopupMenuButton<String>(
+                    onSelected: (value) {
+                      switch (value) {
+                        case 'open':
+                          _openGroupChat(id);
+                          break;
+                        case 'leave':
+                          _confirmAndLeaveGroup(g);
+                          break;
+                      }
+                    },
+                    itemBuilder: (ctx) => const [
+                      PopupMenuItem<String>(
+                        value: 'open',
+                        child: Text('Open chat'),
+                      ),
+                      PopupMenuItem<String>(
+                        value: 'leave',
+                        child: Text('Leave group'),
+                      ),
+                    ],
+                  ),
                 );
               },
             );
