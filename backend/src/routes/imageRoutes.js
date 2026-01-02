@@ -11,38 +11,36 @@ const {
 
 const { authenticateToken } = require('./auth_middleware');
 
-// List images for an outing
-// (You can remove authenticateToken here if you truly want this to be public.)
-router.get(
-  '/api/outings/:outingId/images',
-  authenticateToken,
-  listOutingImages
-);
+// Run multer ONLY when the request is multipart/form-data
+function maybeUploadSingleImage(req, res, next) {
+  // Some clients send "multipart/form-data; boundary=..."
+  const isMultipart = req.is('multipart/form-data');
+  if (!isMultipart) return next();
 
-// Upload image for an outing (multipart/form-data, field name "image")
-// Same endpoint is also used for JSON body (Unsplash URL); controller
-// should handle both a file upload and { imageUrl, imageSource } payloads.
+  // Delegate to multer middleware
+  return uploader.single('image')(req, res, next);
+}
+
+// List images for an outing
+router.get('/api/outings/:outingId/images', authenticateToken, listOutingImages);
+
+// Create image for an outing
+// - multipart/form-data (field "image") OR
+// - JSON { imageUrl, imageSource }
 router.post(
   '/api/outings/:outingId/images',
   authenticateToken,
-  uploader.single('image'),
+  maybeUploadSingleImage,
   uploadOutingImage
 );
 
 // Delete image by id
-// Frontend calls DELETE /api/images/:imageId
-router.delete(
-  '/api/images/:imageId',
-  authenticateToken,
-  deleteImage
-);
+router.delete('/api/images/:imageId', authenticateToken, deleteImage);
 
 // (Optional) Fetch single image metadata – kept simple for now.
 router.get('/api/images/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    // If you later store extra metadata for a single image,
-    // you can look it up here. For now we just echo the id.
     res.json({ id, url: null, caption: null });
   } catch (err) {
     console.error('imageRoutes error:', err);

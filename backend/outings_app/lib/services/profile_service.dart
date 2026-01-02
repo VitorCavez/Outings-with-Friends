@@ -26,6 +26,9 @@ class ProfileService {
   }
 
   /// PUT /api/users/me/profile
+  ///
+  /// NEW: [clearProfilePhotoUrl] lets us explicitly clear the profile photo online.
+  /// We send `"profilePhotoUrl": null` when true.
   Future<UserProfile> updateMyProfile({
     String? fullName,
     String? bio,
@@ -33,6 +36,7 @@ class ProfileService {
     bool? isProfilePublic,
     List<String>? preferredOutingTypes,
     String? profilePhotoUrl,
+    bool clearProfilePhotoUrl = false,
     List<String>? badges,
   }) async {
     final body = <String, dynamic>{
@@ -42,9 +46,16 @@ class ProfileService {
       if (isProfilePublic != null) 'isProfilePublic': isProfilePublic,
       if (preferredOutingTypes != null)
         'preferredOutingTypes': preferredOutingTypes,
+
+      // Normal set
       if (profilePhotoUrl != null) 'profilePhotoUrl': profilePhotoUrl,
+
+      // Explicit clear (send null)
+      if (clearProfilePhotoUrl) 'profilePhotoUrl': null,
+
       if (badges != null) 'badges': badges,
     };
+
     final r = await api.putJson('/api/users/me/profile', body);
     if (r.statusCode != 200) {
       throw Exception('Update profile failed (${r.statusCode})');
@@ -126,9 +137,6 @@ class ProfileService {
   }
 
   /// GET /api/users/:userId/timeline?from=&to=&limit=&offset=
-  ///
-  /// Tip: pass ISO strings like:
-  ///   DateFormat("yyyy-MM-ddTHH:mm:ss.SSS'Z'").format(date.toUtc())
   Future<ProfileTimelineResponse> fetchTimeline(
     String userId, {
     String? fromIso,
@@ -152,11 +160,6 @@ class ProfileService {
     return ProfileTimelineResponse.fromJson(map);
   }
 
-  /// 🔹 Wrapper for widgets (e.g. TripTimelineList) that expect a simple
-  /// `List<Map<String,dynamic>>`. It maps the typed DTOs returned by
-  /// `fetchTimeline(...)` into the exact keys your UI reads:
-  ///  - title, description, dateTimeStart, dateTimeEnd
-  ///  - linkedOuting (map with id/title/outingType/... when present)
   Future<List<Map<String, dynamic>>> getUserTimeline({
     required String userId,
     int limit = 50,

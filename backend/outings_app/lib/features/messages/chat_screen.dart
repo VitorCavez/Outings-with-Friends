@@ -1,9 +1,12 @@
 // lib/features/messages/chat_screen.dart
 import 'dart:async';
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'package:outings_app/services/socket_service.dart';
 import 'package:outings_app/services/upload_service.dart';
@@ -75,7 +78,6 @@ class _ChatScreenState extends State<ChatScreen> {
       final svc = GroupService(_api());
       final raw = await svc.getGroup(gid); // tolerates {ok,data} or raw
 
-      // Normalise the result into a Map<String, dynamic>
       Map<String, dynamic> map;
       if (raw is Map<String, dynamic>) {
         final inner =
@@ -117,15 +119,12 @@ class _ChatScreenState extends State<ChatScreen> {
       _newMarkerId = msg.id;
     }
 
-    // Update visible thread
     chat.addIncoming(msg);
 
-    // Warm local recents cache for GROUP threads
     if (chat.groupId != null && msg.groupId == chat.groupId) {
       _repo.upsertGroupOne(chat.groupId!, msg);
     }
 
-    // DM-specific handling
     if (chat.peerUserId != null) {
       final peer = chat.peerUserId!;
 
@@ -181,7 +180,6 @@ class _ChatScreenState extends State<ChatScreen> {
     _socket.on('message_read', _onMessageRead);
     _socket.on('presence', _onPresence);
 
-    // Join group room when opening a group chat
     if (chat.groupId != null && chat.groupId!.isNotEmpty) {
       _socket.joinGroup(chat.groupId!);
       _repo.setActiveGroup(chat.groupId);
@@ -189,7 +187,6 @@ class _ChatScreenState extends State<ChatScreen> {
       _repo.setActiveGroup(null);
     }
 
-    // Mark DM thread as active & clear unseen
     if (chat.peerUserId != null) {
       _repo.setActivePeer(chat.peerUserId);
       _repo.markThreadSeen(chat.peerUserId!);
@@ -197,7 +194,6 @@ class _ChatScreenState extends State<ChatScreen> {
       _repo.setActivePeer(null);
     }
 
-    // Load group title
     _loadGroupTitleIfNeeded();
 
     _controller.addListener(() {
@@ -221,7 +217,6 @@ class _ChatScreenState extends State<ChatScreen> {
       _socket.queryPresence(chat.peerUserId!);
     }
 
-    // Warm UI from local cache immediately, then fetch from server.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final chat2 = context.read<ChatState>();
@@ -400,6 +395,51 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  String _prettyMB(int bytes) {
+    final mb = bytes / (1024 * 1024);
+    return '${mb.toStringAsFixed(2)}MB';
+  }
+
+  Future<File> _compressChatImage(File original) async {
+    // Strict-ish for chat images (still readable)
+    const int maxDim = 1440;
+    const int quality = 75;
+
+    final tmpDir = await getTemporaryDirectory();
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final base = 'chat_$ts';
+
+    // Try WebP first
+    try {
+      final outPath = '${tmpDir.path}/$base.webp';
+      final result = await FlutterImageCompress.compressAndGetFile(
+        original.absolute.path,
+        outPath,
+        quality: quality,
+        minWidth: maxDim,
+        minHeight: maxDim,
+        format: CompressFormat.webp,
+        keepExif: false,
+      );
+      if (result != null) return File(result.path);
+    } catch (_) {
+      // fallback below
+    }
+
+    final outPath = '${tmpDir.path}/$base.jpg';
+    final result = await FlutterImageCompress.compressAndGetFile(
+      original.absolute.path,
+      outPath,
+      quality: quality,
+      minWidth: maxDim,
+      minHeight: maxDim,
+      format: CompressFormat.jpeg,
+      keepExif: false,
+    );
+
+    return result != null ? File(result.path) : original;
+  }
+
   Future<void> _pickAndSendAttachment() async {
     final chat = context.read<ChatState>();
 
@@ -414,7 +454,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final path = picked.path;
     if (path == null) return;
 
-    final file = File(path);
+    final originalFile = File(path);
     final isImage = _isImageExtension(picked.extension);
 
     final tempId = 'tmp_${DateTime.now().microsecondsSinceEpoch}';
@@ -442,9 +482,33 @@ class _ChatScreenState extends State<ChatScreen> {
 
     _scheduleScrollToBottom();
 
+    File fileToUpload = originalFile;
+    bool deleteTempAfter = false;
+
     try {
-      final up = await _uploader.uploadFile(file);
+      // ✅ If it’s an image, compress before upload (STRICT COST CONTROL)
+      if (isImage) {
+        final before = await originalFile.length();
+        final compressed = await _compressChatImage(originalFile);
+        final after = await compressed.length();
+
+        fileToUpload = compressed;
+        deleteTempAfter = (compressed.path != originalFile.path);
+
+        if (mounted && deleteTempAfter) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Image optimized ${_prettyMB(before)} → ${_prettyMB(after)}',
+              ),
+            ),
+          );
+        }
+      }
+
+      final up = await _uploader.uploadFile(fileToUpload);
       if (!mounted) return;
+
       _socket.sendMessage(
         text: isImage ? '' : (picked.name),
         senderId: chat.currentUserId,
@@ -466,6 +530,13 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ),
       );
+    } finally {
+      // Clean up compressed temp file (never delete the original)
+      if (deleteTempAfter) {
+        try {
+          if (await fileToUpload.exists()) await fileToUpload.delete();
+        } catch (_) {}
+      }
     }
   }
 
@@ -537,7 +608,6 @@ class _ChatScreenState extends State<ChatScreen> {
     return count;
   }
 
-  // Fallback initials when we don’t have a name
   String _initialsFromId(String raw) {
     final clean = raw.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
     if (clean.length >= 2) return clean.substring(0, 2).toUpperCase();
@@ -577,17 +647,13 @@ class _ChatScreenState extends State<ChatScreen> {
     final c = Theme.of(context).colorScheme;
     final brand = Theme.of(context).extension<BrandColors>();
 
-    // Backstop each frame: mark visible incoming as read + clear unseen
     WidgetsBinding.instance.addPostFrameCallback((_) => _sendReadForVisible());
 
-    // Resolve friendly name
     final resolver = DisplayNameResolver.of(context);
     String title;
     if (chat.peerUserId != null) {
-      // Direct message → prefer contact/profile name
       title = resolver.forUserId(chat.peerUserId!, fallback: 'Conversation');
     } else if (chat.groupId != null) {
-      // Group chat → use loaded group title
       title = _groupTitle ?? 'Group chat';
     } else {
       title = 'Chat';
@@ -596,7 +662,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final unread = _unreadCount(messages);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
-    final showPresenceDot = chat.peerUserId != null; // hide for groups
+    final showPresenceDot = chat.peerUserId != null;
 
     return Scaffold(
       appBar: AppBar(

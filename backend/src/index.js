@@ -84,6 +84,16 @@ const onlineUsers = new Set();
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
+// Saver Mode auto-toggle + policy
+const { initSaverModeJob } = require('./jobs/saverModeJob');
+initSaverModeJob(app, prisma);
+
+// -----------------------------
+// ✅ Image retention job (thumb-only after N days)
+// -----------------------------
+const { startImageRetentionJob } = require('./jobs/imageRetentionJob');
+startImageRetentionJob();
+
 // ---- Helpers -------------------------------------------------
 function toUser(userId) {
   return io.to(`user:${userId}`);

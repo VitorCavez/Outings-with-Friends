@@ -10,22 +10,17 @@
   "scripts": {
     "dev": "nodemon backend/src/index.js",
     "start": "node backend/src/index.js",
-
     "render-build": "npm install --omit=dev && npm run prisma:deploy",
-
     "start:all": "concurrently \"npm run dev\" \"cd outings_app && flutter run -d windows\"",
-
     "test": "cross-env NODE_ENV=test jest --config backend/jest.config.js",
     "test:watch": "cross-env NODE_ENV=test jest --config backend/jest.config.js --watch",
     "admin:stats": "node backend/scripts/admin.js stats",
     "admin:env": "node backend/scripts/admin.js env:check",
     "admin:backup": "node backend/scripts/admin.js backup:print",
-
     "prisma:deploy": "prisma migrate deploy --schema backend/prisma/schema.prisma --env-file backend/.env",
     "prisma:reset": "prisma migrate reset -f --schema backend/prisma/schema.prisma --env-file backend/.env",
     "prisma:generate": "prisma generate --schema backend/prisma/schema.prisma --env-file backend/.env",
     "migrate:dev": "prisma migrate dev --schema backend/prisma/schema.prisma --env-file backend/.env",
-
     "db:reset": "prisma migrate reset -f --schema backend/prisma/schema.prisma --env-file backend/.env",
     "db:seed": "node backend/prisma/seed.js",
     "db:reset-seed": "npm run db:reset && npm run db:seed"
@@ -57,6 +52,7 @@
     "morgan": "^1.10.0",
     "multer": "^2.0.2",
     "multer-storage-cloudinary": "^4.0.0",
+    "node-cron": "^4.2.1",
     "prisma": "^6.12.0",
     "socket.io": "^4.8.1"
   },

@@ -326,6 +326,52 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
   }
 
   // -----------------------------
+  // Image URL optimizer (thumb-only)
+  // Supports Cloudinary + Unsplash. Falls back to original URL.
+  // -----------------------------
+  String _optimizedImageUrl(
+    String url, {
+    required int w,
+    int? h,
+    int q = 70,
+    bool crop = true,
+  }) {
+    final u = Uri.tryParse(url);
+    if (u == null) return url;
+
+    final host = u.host.toLowerCase();
+
+    // ✅ Cloudinary: insert transformations after /upload/
+    if (u.path.contains('/upload/')) {
+      final parts = <String>[
+        'f_auto',
+        'q_auto:eco',
+        'w_$w',
+        if (h != null) 'h_$h',
+        crop ? 'c_fill' : 'c_limit',
+        'g_auto',
+      ];
+      final trans = parts.join(',');
+      final newPath = u.path.replaceFirst('/upload/', '/upload/$trans/');
+      return u.replace(path: newPath).toString();
+    }
+
+    // ✅ Unsplash: add w/h/q/auto/fit params
+    if (host.contains('unsplash.com')) {
+      final qp = Map<String, String>.from(u.queryParameters);
+      qp['w'] = w.toString();
+      if (h != null) qp['h'] = h.toString();
+      qp['q'] = q.toString();
+      qp.putIfAbsent('auto', () => 'format');
+      if (crop) qp['fit'] = 'crop';
+      return u.replace(queryParameters: qp).toString();
+    }
+
+    // Fallback: unknown host → leave unchanged
+    return url;
+  }
+
+  // -----------------------------
   // Publish / Invite
   // -----------------------------
   Future<void> _openPublishSheet({
@@ -424,7 +470,7 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                                     }
                                     if (mounted) Navigator.of(ctx).maybePop();
                                     setState(() {
-                                      _changed = true; // mark parent refresh
+                                      _changed = true;
                                       _detailsFuture = _svc.fetchOutingDetails(
                                         widget.outingId,
                                       );
@@ -530,7 +576,6 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
         ],
       ),
     );
-    // No manual dispose of ctl – it will be GC'd with the dialog subtree.
   }
 
   // -----------------------------
@@ -576,7 +621,7 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Outing deleted')));
-        Navigator.of(context).pop<bool>(true); // ✅ tell parent to refresh
+        Navigator.of(context).pop<bool>(true);
       } else if (resp.statusCode == 403) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -586,7 +631,6 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
         );
       } else if (resp.statusCode == 404) {
         if (!mounted) return;
-        // Already gone → behave as success and refresh parent
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Outing not found (already deleted).')),
         );
@@ -659,7 +703,7 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
       if (resp.statusCode == 200 || resp.statusCode == 201) {
         setState(() {
           _isFavorite = !(_isFavorite ?? false);
-          _changed = true; // ← notify parent to refresh lists after pop
+          _changed = true;
         });
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -727,7 +771,7 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
         ),
       );
       setState(() {
-        _changed = true; // parent should refresh
+        _changed = true;
         _detailsFuture = _svc.fetchOutingDetails(widget.outingId);
       });
     } catch (e) {
@@ -1007,7 +1051,6 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                                 .split('.')
                                 .first ??
                             '';
-
                         final isMine =
                             (currentUserId != null &&
                             c.userId == currentUserId);
@@ -1074,7 +1117,7 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Contribution deleted')));
-        setState(() => _pbReloadNonce++); // reload Piggy Bank card
+        setState(() => _pbReloadNonce++);
       } else {
         ScaffoldMessenger.of(
           context,
@@ -1181,7 +1224,7 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
             ),
           );
         }
-        if (snap.hasError) {
+        if (snap.hasError || !snap.hasData) {
           return Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -1436,13 +1479,24 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                   final isMe = p.userId == me;
                   final title = p.fullName ?? p.username ?? p.userId;
                   final role = isOwner ? _ParticipantRole.OWNER : p.role;
+
+                  final photoUrl = (p.photo != null && p.photo!.isNotEmpty)
+                      ? _optimizedImageUrl(
+                          p.photo!,
+                          w: 96,
+                          h: 96,
+                          q: 60,
+                          crop: true,
+                        )
+                      : null;
+
                   return ListTile(
                     dense: true,
                     leading: CircleAvatar(
-                      backgroundImage: (p.photo != null && p.photo!.isNotEmpty)
-                          ? NetworkImage(p.photo!)
+                      backgroundImage: photoUrl != null
+                          ? NetworkImage(photoUrl)
                           : null,
-                      child: (p.photo == null || p.photo!.isEmpty)
+                      child: (photoUrl == null)
                           ? const Icon(Icons.person_outline)
                           : null,
                     ),
@@ -1599,7 +1653,6 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
         ),
         title: const Text('Outing details'),
         actions: [
-          // Delete
           IconButton(
             tooltip: _isLocalOnly
                 ? 'Delete (disabled while syncing)'
@@ -1609,7 +1662,6 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                 : null,
             icon: const Icon(Icons.delete_outline),
           ),
-          // Edit
           IconButton(
             tooltip: _isLocalOnly
                 ? 'Edit (disabled while syncing)'
@@ -1623,7 +1675,6 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                   },
             icon: const Icon(Icons.edit_outlined),
           ),
-          // Share (short)
           IconButton(
             tooltip: _isLocalOnly ? 'Share (disabled while syncing)' : 'Share',
             onPressed: _isLocalOnly
@@ -1638,7 +1689,6 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                   },
             icon: const Icon(Icons.ios_share),
           ),
-          // Copy link
           IconButton(
             tooltip: _isLocalOnly
                 ? 'Copy link (disabled while syncing)'
@@ -1655,7 +1705,6 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                   },
             icon: const Icon(Icons.link),
           ),
-          // Favorite
           IconButton(
             tooltip: _isLocalOnly
                 ? 'Favorite (disabled while syncing)'
@@ -1745,10 +1794,11 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                             const SizedBox(height: 12),
                             ElevatedButton.icon(
                               onPressed: () {
-                                setState(
-                                  () => _detailsFuture = _svc
-                                      .fetchOutingDetails(widget.outingId),
-                                );
+                                setState(() {
+                                  _detailsFuture = _svc.fetchOutingDetails(
+                                    widget.outingId,
+                                  );
+                                });
                               },
                               icon: const Icon(Icons.refresh),
                               label: const Text('Retry'),
@@ -1769,21 +1819,72 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                   final allowEdits = d.allowParticipantEdits ?? false;
                   final showOrganizer = d.showOrganizer ?? true;
 
+                  // ✅ Compute heroUrl OUTSIDE children[] (no `final` inside collection)
+                  final String? heroUrl = (() {
+                    final url = d.imageUrl;
+                    if (url == null || url.isEmpty) return null;
+
+                    final dpr = MediaQuery.of(context).devicePixelRatio;
+                    final screenW = MediaQuery.of(context).size.width;
+
+                    final heroW = (screenW * dpr).round().clamp(320, 2048);
+                    final heroH = (200 * dpr).round().clamp(200, 1200);
+
+                    return _optimizedImageUrl(
+                      url,
+                      w: heroW,
+                      h: heroH,
+                      q: 70,
+                      crop: true,
+                    );
+                  })();
+
                   return DefaultTextStyle.merge(
                     style: TextStyle(color: cs.onSurface),
                     child: ListView(
                       controller: _scrollController,
                       padding: const EdgeInsets.all(16),
                       children: [
-                        if (d.imageUrl != null)
+                        if (heroUrl != null)
                           Hero(
                             tag: 'outing:${widget.outingId}',
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(14),
                               child: Image.network(
-                                d.imageUrl!,
+                                heroUrl,
                                 height: 200,
                                 fit: BoxFit.cover,
+                                filterQuality: FilterQuality.low,
+                                loadingBuilder: (ctx, child, progress) {
+                                  if (progress == null) return child;
+                                  return Container(
+                                    height: 200,
+                                    color: Theme.of(
+                                      context,
+                                    ).dividerColor.withValues(alpha: .18),
+                                    alignment: Alignment.center,
+                                    child: const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                  );
+                                },
+                                errorBuilder: (ctx, err, st) => Container(
+                                  height: 200,
+                                  color: Theme.of(
+                                    context,
+                                  ).dividerColor.withValues(alpha: .18),
+                                  alignment: Alignment.center,
+                                  child: Icon(
+                                    Icons.broken_image_outlined,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
@@ -1870,7 +1971,6 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                             ],
                           ),
                         ],
-
                         if (isOwner) ...[
                           const SizedBox(height: 16),
                           Row(
@@ -1893,7 +1993,6 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                             ],
                           ),
                         ],
-
                         const SizedBox(height: 12),
                         Wrap(
                           spacing: 8,
@@ -1917,7 +2016,6 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                             ),
                           ],
                         ),
-
                         const SizedBox(height: 16),
                         Container(
                           key: _participantsKey,
@@ -1927,7 +2025,6 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                             allowEdits: allowEdits,
                           ),
                         ),
-
                         const SizedBox(height: 16),
                         Container(
                           key: _imagesKey,
@@ -1951,11 +2048,10 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                                       Future.delayed(
                                         const Duration(milliseconds: 50),
                                         () {
-                                          if (mounted) {
+                                          if (mounted)
                                             setState(
                                               () => _reloadingImages = false,
                                             );
-                                          }
                                         },
                                       );
                                     },
@@ -1971,7 +2067,6 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                           outingId: widget.outingId,
                           api: _api,
                         ),
-
                         const SizedBox(height: 16),
                         Container(
                           key: _itineraryKey,
@@ -1991,10 +2086,8 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
                           outingId: widget.outingId,
                           api: _api,
                         ),
-
                         const SizedBox(height: 16),
                         _buildPiggyBankCard(d),
-
                         const SizedBox(height: 16),
                         Container(
                           key: _expensesKey,
@@ -2009,7 +2102,6 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
             ),
     );
 
-    // Wrap with WillPopScope to return the "changed" flag to parents
     return WillPopScope(
       onWillPop: () async {
         Navigator.of(context).pop<bool>(_changed);
@@ -2021,7 +2113,7 @@ class _OutingDetailsScreenState extends State<OutingDetailsScreen> {
 }
 
 // -----------------------------
-// Dialogs (now accept controllers from caller)
+// Dialogs
 // -----------------------------
 class _EditOutingDialog extends StatelessWidget {
   const _EditOutingDialog({required this.titleCtrl, required this.notesCtrl});
@@ -2246,7 +2338,6 @@ class _VisibilityPicker extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ✅ This keeps the segmented control fully on-screen on small devices.
         LayoutBuilder(
           builder: (ctx, constraints) {
             return ConstrainedBox(

@@ -4,6 +4,48 @@ import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../../providers/contacts_provider.dart';
 
+/// Strict-cost thumbnail helper for avatars in list views.
+String _thumbUrl(String raw, {int w = 120, int q = 70}) {
+  if (raw.trim().isEmpty) return raw;
+
+  Uri? uri;
+  try {
+    uri = Uri.parse(raw);
+  } catch (_) {
+    return raw;
+  }
+
+  final host = uri.host.toLowerCase();
+
+  if (host.contains('images.unsplash.com')) {
+    final qp = Map<String, String>.from(uri.queryParameters);
+    qp['w'] = '$w';
+    qp['q'] = '$q';
+    qp['auto'] = qp['auto'] ?? 'format';
+    qp['fit'] = qp['fit'] ?? 'crop';
+    return uri.replace(queryParameters: qp).toString();
+  }
+
+  if (host.contains('res.cloudinary.com') && raw.contains('/upload/')) {
+    final idx = raw.indexOf('/upload/');
+    final prefix = raw.substring(0, idx + '/upload/'.length);
+    final rest = raw.substring(idx + '/upload/'.length);
+
+    final firstSeg = rest.split('/').first;
+    final looksLikeTransform =
+        firstSeg.contains('w_') ||
+        firstSeg.contains('q_') ||
+        firstSeg.contains('c_') ||
+        firstSeg.contains('f_');
+    if (looksLikeTransform) return raw;
+
+    final transform = 'c_fill,w_$w,q_$q,f_auto';
+    return '$prefix$transform/$rest';
+  }
+
+  return raw;
+}
+
 class ContactsListScreen extends StatefulWidget {
   const ContactsListScreen({super.key});
 
@@ -83,7 +125,6 @@ class _ContactsListScreenState extends State<ContactsListScreen> {
                     ? null
                     : _labelCtrl.text.trim();
 
-                // This returns true/false (provider sets prov.error on failure).
                 final ok = await prov.addByPhone(phone, label: label);
 
                 if (!context.mounted) return;
@@ -177,7 +218,7 @@ class _ContactsListScreenState extends State<ContactsListScreen> {
             : ListView.separated(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: EdgeInsets.zero,
-                itemCount: prov.contacts.length + 1, // + header
+                itemCount: prov.contacts.length + 1,
                 separatorBuilder: (_, i) => i == 0
                     ? const SizedBox.shrink()
                     : Divider(color: dividerColor, height: 1),
@@ -188,8 +229,12 @@ class _ContactsListScreenState extends State<ContactsListScreen> {
                   final u = c['user'] as Map<String, dynamic>? ?? {};
                   final userId = (u['id'] ?? '') as String;
                   final fullName = (u['fullName'] ?? 'Unknown') as String;
-                  final photo = (u['profilePhotoUrl'] ?? '') as String;
+                  final photoRaw = (u['profilePhotoUrl'] ?? '') as String;
                   final label = (c['label'] ?? '') as String;
+
+                  final photo = photoRaw.isNotEmpty
+                      ? _thumbUrl(photoRaw, w: 120, q: 70)
+                      : '';
 
                   String initialsFrom(String name) {
                     final parts = name.trim().split(RegExp(r'\s+'));

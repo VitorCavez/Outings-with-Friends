@@ -131,11 +131,6 @@ class MessageBubble extends StatelessWidget {
     return isMine ? c.primary : c.surfaceContainerHighest;
   }
 
-  static Color _bubbleTextColor(ColorScheme c, bool isMine) =>
-      isMine ? c.onPrimary : c.onSurface;
-
-  static Color _metaTextColor(ColorScheme c) => c.onSurfaceVariant;
-
   static String _fmtTime(DateTime dt) {
     final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
     final m = dt.minute.toString().padLeft(2, '0');
@@ -144,41 +139,157 @@ class MessageBubble extends StatelessWidget {
   }
 }
 
+// ---- Thumbnail helpers (strict-cost) ----------------------------------------
+// We ONLY request small images in list/chat contexts.
+// Full image loads only when user taps to view.
+String _thumbUrl(String raw, {int w = 480, int q = 70}) {
+  if (raw.trim().isEmpty) return raw;
+
+  Uri? uri;
+  try {
+    uri = Uri.parse(raw);
+  } catch (_) {
+    return raw;
+  }
+
+  final host = (uri.host).toLowerCase();
+
+  // Unsplash thumbnails
+  if (host.contains('images.unsplash.com')) {
+    final qp = Map<String, String>.from(uri.queryParameters);
+    qp['w'] = '$w';
+    qp['q'] = '$q';
+    qp['auto'] = qp['auto'] ?? 'format';
+    qp['fit'] = qp['fit'] ?? 'crop';
+    return uri.replace(queryParameters: qp).toString();
+  }
+
+  // Cloudinary thumbnails (insert transformation after /upload/)
+  if (host.contains('res.cloudinary.com') && raw.contains('/upload/')) {
+    final idx = raw.indexOf('/upload/');
+    final prefix = raw.substring(0, idx + '/upload/'.length);
+    final rest = raw.substring(idx + '/upload/'.length);
+
+    // If a transformation segment already exists, don't double-transform.
+    final firstSeg = rest.split('/').first;
+    final looksLikeTransform =
+        firstSeg.contains('w_') ||
+        firstSeg.contains('q_') ||
+        firstSeg.contains('c_') ||
+        firstSeg.contains('f_');
+
+    if (looksLikeTransform) return raw;
+
+    final transform = 'c_fill,w_$w,q_$q,f_auto';
+    return '$prefix$transform/$rest';
+  }
+
+  // Default: leave untouched (unknown provider)
+  return raw;
+}
+
 // ---- Image attachment -------------------------------------------------------
 
 class _ImageAttachment extends StatelessWidget {
   const _ImageAttachment({required this.url});
   final String url;
 
+  void _openViewer(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (ctx) {
+        final cs = Theme.of(ctx).colorScheme;
+        return Dialog(
+          insetPadding: const EdgeInsets.all(12),
+          backgroundColor: Colors.transparent,
+          child: Stack(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: InteractiveViewer(
+                  minScale: 1,
+                  maxScale: 4,
+                  child: CachedNetworkImage(
+                    imageUrl: url, // full-size on demand
+                    fit: BoxFit.contain,
+                    placeholder: (_, __) => Container(
+                      height: 360,
+                      color: Colors.black54,
+                      alignment: Alignment.center,
+                      child: const SizedBox(
+                        height: 28,
+                        width: 28,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                    errorWidget: (_, __, ___) => Container(
+                      height: 360,
+                      color: Colors.black54,
+                      alignment: Alignment.center,
+                      child: Icon(
+                        Icons.broken_image_outlined,
+                        size: 34,
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: IconButton.filledTonal(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  icon: const Icon(Icons.close),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = Theme.of(context).colorScheme;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: CachedNetworkImage(
-        imageUrl: url,
-        fit: BoxFit.cover,
-        // keep a reasonable image size
-        memCacheHeight: 1200,
-        memCacheWidth: 1200,
-        placeholder: (context, _) => Container(
-          height: 180,
-          width: 220,
-          color: c.surface, // avoids harsh white
-          alignment: Alignment.center,
-          child: const SizedBox(
-            height: 22,
-            width: 22,
-            child: CircularProgressIndicator(strokeWidth: 2),
+    // thumbnail for bubble view
+    final thumb = _thumbUrl(url, w: 480, q: 70);
+
+    return GestureDetector(
+      onTap: () => _openViewer(context),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: CachedNetworkImage(
+          imageUrl: thumb,
+          fit: BoxFit.cover,
+          // keep a reasonable image size in memory for chat scrolling
+          memCacheHeight: 600,
+          memCacheWidth: 600,
+          placeholder: (context, _) => Container(
+            height: 180,
+            width: 220,
+            color: c.surface, // avoids harsh white
+            alignment: Alignment.center,
+            child: const SizedBox(
+              height: 22,
+              width: 22,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
           ),
-        ),
-        errorWidget: (context, _, __) => Container(
-          height: 180,
-          width: 220,
-          color: c.surfaceVariant,
-          alignment: Alignment.center,
-          child: Icon(Icons.broken_image, size: 28, color: c.onSurfaceVariant),
+          errorWidget: (context, _, __) => Container(
+            height: 180,
+            width: 220,
+            color: c.surfaceVariant,
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.broken_image,
+              size: 28,
+              color: c.onSurfaceVariant,
+            ),
+          ),
         ),
       ),
     );
@@ -261,11 +372,16 @@ class _AvatarCircle extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = Theme.of(context).colorScheme;
 
+    // Also thumbnail avatars if they are remote.
+    final thumb = (imageUrl != null && imageUrl!.trim().isNotEmpty)
+        ? _thumbUrl(imageUrl!, w: 120, q: 70)
+        : null;
+
     return CircleAvatar(
       radius: 14,
-      backgroundImage: imageUrl != null ? NetworkImage(imageUrl!) : null,
-      backgroundColor: imageUrl == null ? c.secondaryContainer : null,
-      child: imageUrl == null
+      backgroundImage: thumb != null ? NetworkImage(thumb) : null,
+      backgroundColor: thumb == null ? c.secondaryContainer : null,
+      child: thumb == null
           ? Text(
               (label ?? '🙂').characters.take(2).toString().toUpperCase(),
               style: TextStyle(fontSize: 11, color: c.onSecondaryContainer),

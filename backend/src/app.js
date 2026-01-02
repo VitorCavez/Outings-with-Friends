@@ -180,6 +180,10 @@ app.use(geoRoutes);
 const placeRoutes = require('./routes/placeRoutes');
 app.use(placeRoutes);
 
+// App config / feature flags
+const appConfigRoutes = require('./routes/appConfigRoutes');
+app.use(appConfigRoutes);
+
 /* ---------------- 404 & Errors --------------------------- */
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found', path: req.originalUrl });
