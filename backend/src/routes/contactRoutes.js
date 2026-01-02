@@ -7,6 +7,9 @@ const ctrl = require('../controllers/contactController');
 // Phone-number discovery only (no global search)
 router.post('/lookup-by-phone', requireAuth, ctrl.lookupByPhone);
 
+// Bulk match (WhatsApp-style)
+router.post('/match', requireAuth, ctrl.matchContacts);
+
 // Manage my contacts
 router.post('/', requireAuth, ctrl.addContact);
 router.get('/', requireAuth, ctrl.listContacts);

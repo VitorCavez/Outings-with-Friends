@@ -15,6 +15,7 @@ class ContactsProvider extends ChangeNotifier {
   String? get error => _error;
   List<Map<String, dynamic>> get contacts => List.unmodifiable(_contacts);
 
+  /// Load my contacts list
   Future<void> refresh() async {
     _setLoading(true);
     _setError(null);
@@ -27,28 +28,67 @@ class ContactsProvider extends ChangeNotifier {
     }
   }
 
+  /// Returns:
+  /// - a user map if found
+  /// - null if not found (404)
+  /// Sets provider error only on *real* errors (network/server/auth).
   Future<Map<String, dynamic>?> lookupByPhone(
     String phone, {
     String defaultCountryCode = '+353',
   }) async {
+    _setError(null);
     try {
-      return await service.lookupByPhone(
+      final user = await service.lookupByPhone(
         phone,
         defaultCountryCode: defaultCountryCode,
       );
+      // user == null means "not found" — not an app error
+      return user;
     } catch (e) {
       _setError(e.toString());
       return null;
     }
   }
 
-  Future<void> addByPhone(String phone, {String? label}) async {
+  /// Add contact by phone.
+  ///
+  /// Returns true if the contact was added (or already existed).
+  /// Returns false if it failed (error will be set).
+  Future<bool> addByPhone(
+    String phone, {
+    String? label,
+    String defaultCountryCode = '+353',
+  }) async {
     _setLoading(true);
+    _setError(null);
+
     try {
-      await service.addContactByPhone(phone, label: label);
-      await refresh();
+      // Optional improvement: try lookup first so we can show "not found"
+      // before attempting to create the contact.
+      final found = await service.lookupByPhone(
+        phone,
+        defaultCountryCode: defaultCountryCode,
+      );
+
+      if (found == null) {
+        _setError('No user found with that phone number.');
+        return false;
+      }
+
+      await service.addContactByPhone(
+        phone,
+        label: label,
+        defaultCountryCode: defaultCountryCode,
+      );
+
+      // Refresh list without re-toggling loading inside refresh()
+      _contacts = await service.listContacts();
+      notifyListeners();
+
+      return true;
     } catch (e) {
       _setError(e.toString());
+      return false;
     } finally {
       _setLoading(false);
     }
@@ -56,6 +96,7 @@ class ContactsProvider extends ChangeNotifier {
 
   Future<void> remove(String userId) async {
     _setLoading(true);
+    _setError(null);
     try {
       await service.removeContact(userId);
       _contacts.removeWhere((c) => (c['user']?['id'] ?? '') == userId);

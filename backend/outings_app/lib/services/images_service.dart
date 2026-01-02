@@ -10,6 +10,22 @@ class ImagesService {
   ImagesService(this.api);
   final ApiClient api;
 
+  /// Token helper:
+  /// - Prefer ApiClient.tokenProvider() if present
+  /// - Fallback to ApiClient.authToken
+  /// This matters because MultipartRequest does NOT go through ApiClient.get/postJson().
+  String? _currentToken() {
+    try {
+      final t = api.tokenProvider?.call();
+      if (t != null && t.isNotEmpty) return t;
+    } catch (_) {
+      // ignore
+    }
+    final t2 = api.authToken;
+    if (t2 != null && t2.isNotEmpty) return t2;
+    return null;
+  }
+
   /// GET /api/outings/:outingId/images
   Future<List<OutingImage>> listOutingImages(String outingId) async {
     final r = await api.get('/api/outings/$outingId/images');
@@ -34,16 +50,22 @@ class ImagesService {
     final f = file ?? (path != null ? File(path) : null);
     if (f == null) throw ArgumentError('Provide either file or path');
 
+    // If we have no token at all, fail fast with a clear error (instead of 401).
+    final token = _currentToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Auth token missing. Please log out and log in again.');
+    }
+
     final length = await f.length();
     final request = http.MultipartRequest(
       'POST',
       Uri.parse('${api.baseUrl}/api/outings/$outingId/images'),
     );
 
-    // auth header (ApiClient doesn’t help with MultipartRequest)
-    if (api.authToken != null && api.authToken!.isNotEmpty) {
-      request.headers['Authorization'] = 'Bearer ${api.authToken}';
-    }
+    // IMPORTANT: Do NOT set Content-Type to application/json for multipart.
+    // MultipartRequest will set the correct content-type with boundary itself.
+    request.headers['Accept'] = 'application/json';
+    request.headers['Authorization'] = 'Bearer $token';
 
     request.files.add(
       http.MultipartFile(
@@ -86,14 +108,18 @@ class ImagesService {
 
   /// DELETE /api/images/:imageId
   Future<bool> deleteImage(String imageId) async {
+    final token = _currentToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Auth token missing. Please log out and log in again.');
+    }
+
     final req = http.Request(
       'DELETE',
       Uri.parse('${api.baseUrl}/api/images/$imageId'),
     );
 
-    if (api.authToken != null && api.authToken!.isNotEmpty) {
-      req.headers['Authorization'] = 'Bearer ${api.authToken}';
-    }
+    req.headers['Accept'] = 'application/json';
+    req.headers['Authorization'] = 'Bearer $token';
 
     final streamed = await req.send();
     // Treat both 200 OK and 204 No Content as success

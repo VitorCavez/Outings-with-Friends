@@ -39,6 +39,7 @@ class _ContactsListScreenState extends State<ContactsListScreen> {
       context: context,
       builder: (ctx) {
         final formKey = GlobalKey<FormState>();
+
         return AlertDialog(
           title: const Text('Add contact by phone'),
           content: Form(
@@ -76,23 +77,27 @@ class _ContactsListScreenState extends State<ContactsListScreen> {
             FilledButton(
               onPressed: () async {
                 if (!formKey.currentState!.validate()) return;
+
                 final phone = _phoneCtrl.text.trim();
                 final label = _labelCtrl.text.trim().isEmpty
                     ? null
                     : _labelCtrl.text.trim();
-                try {
-                  await prov.addByPhone(phone, label: label);
-                  if (context.mounted) Navigator.pop(ctx);
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Contact added')),
-                    );
-                  }
-                } catch (e) {
-                  if (!context.mounted) return;
+
+                // This returns true/false (provider sets prov.error on failure).
+                final ok = await prov.addByPhone(phone, label: label);
+
+                if (!context.mounted) return;
+
+                if (ok) {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Contact added')),
+                  );
+                } else {
+                  final msg = prov.error ?? 'Failed to add contact';
                   ScaffoldMessenger.of(
                     context,
-                  ).showSnackBar(SnackBar(content: Text('Failed to add: $e')));
+                  ).showSnackBar(SnackBar(content: Text(msg)));
                 }
               },
               child: const Text('Add'),

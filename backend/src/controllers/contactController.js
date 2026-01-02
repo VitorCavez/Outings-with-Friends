@@ -25,12 +25,20 @@ async function lookupByPhone(req, res) {
     const norm = normalizePhone(phone, { defaultCountryCode });
 
     if (!norm.e164) {
-      return res.status(400).json({ error: 'invalid_phone', reason: norm.reason || 'normalize_failed' });
+      return res
+        .status(400)
+        .json({ error: 'invalid_phone', reason: norm.reason || 'normalize_failed' });
     }
 
     const user = await prisma.user.findUnique({
       where: { phoneE164: norm.e164 },
-      select: { id: true, fullName: true, profilePhotoUrl: true, isProfilePublic: true, allowPublicInvites: true },
+      select: {
+        id: true,
+        fullName: true,
+        profilePhotoUrl: true,
+        isProfilePublic: true,
+        allowPublicInvites: true,
+      },
     });
 
     if (!user) {
@@ -40,6 +48,117 @@ async function lookupByPhone(req, res) {
     return res.json({ user: minimalUser(user) });
   } catch (err) {
     console.error('lookupByPhone error:', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+}
+
+/**
+ * POST /api/contacts/match
+ * body: { phones: string[], defaultCountryCode?: string }
+ *
+ * Bulk match phone numbers -> users.
+ * Returns only matched users (minimal public fields), plus:
+ * - matchedPhoneE164 (for mapping)
+ * - alreadyInContacts flag
+ */
+async function matchContacts(req, res) {
+  try {
+    const ownerUserId = req.user?.userId;
+    if (!ownerUserId) return res.status(401).json({ error: 'unauthorized' });
+
+    const { phones, defaultCountryCode } = req.body || {};
+
+    if (!Array.isArray(phones)) {
+      return res.status(400).json({ error: 'invalid_body', message: 'phones must be an array of strings.' });
+    }
+
+    // Safety cap to avoid huge payloads
+    const MAX_PHONES = 2000;
+    if (phones.length > MAX_PHONES) {
+      return res.status(400).json({
+        error: 'too_many_phones',
+        message: `Max ${MAX_PHONES} phone numbers per request.`,
+      });
+    }
+
+    // Normalize + dedupe
+    const e164Set = new Set();
+    let invalidCount = 0;
+
+    for (const raw of phones) {
+      if (!raw || typeof raw !== 'string') {
+        invalidCount += 1;
+        continue;
+      }
+      const norm = normalizePhone(raw, { defaultCountryCode });
+      if (norm?.e164) {
+        e164Set.add(norm.e164);
+      } else {
+        invalidCount += 1;
+      }
+    }
+
+    const e164List = Array.from(e164Set);
+    if (e164List.length === 0) {
+      return res.json({
+        matches: [],
+        totals: {
+          submitted: phones.length,
+          normalized: 0,
+          matched: 0,
+          invalid: invalidCount,
+        },
+      });
+    }
+
+    // Find users by phoneE164
+    const users = await prisma.user.findMany({
+      where: { phoneE164: { in: e164List } },
+      select: {
+        id: true,
+        fullName: true,
+        profilePhotoUrl: true,
+        isProfilePublic: true,
+        allowPublicInvites: true,
+        phoneE164: true,
+      },
+    });
+
+    // Never return yourself as a "match"
+    const filteredUsers = users.filter((u) => u.id !== ownerUserId);
+
+    const userIds = filteredUsers.map((u) => u.id);
+
+    // Find which matched users are already in my contacts
+    let existingSet = new Set();
+    if (userIds.length > 0) {
+      const existing = await prisma.contact.findMany({
+        where: {
+          ownerUserId,
+          contactUserId: { in: userIds },
+        },
+        select: { contactUserId: true },
+      });
+      existingSet = new Set(existing.map((c) => c.contactUserId));
+    }
+
+    const matches = filteredUsers.map((u) => ({
+      user: minimalUser(u),
+      matchedPhoneE164: u.phoneE164, // helps client map results back
+      alreadyInContacts: existingSet.has(u.id),
+    }));
+
+    return res.json({
+      matches,
+      totals: {
+        submitted: phones.length,
+        normalized: e164List.length,
+        matched: matches.length,
+        invalid: invalidCount,
+      },
+    });
+  } catch (err) {
+    console.error('matchContacts error:', err);
     return res.status(500).json({ error: 'server_error' });
   }
 }
@@ -55,13 +174,14 @@ async function addContact(req, res) {
     if (!ownerUserId) return res.status(401).json({ error: 'unauthorized' });
 
     let { userId, phone, defaultCountryCode, label } = req.body || {};
-
     let contactUserId = userId;
 
     if (!contactUserId && phone) {
       const norm = normalizePhone(phone, { defaultCountryCode });
       if (!norm.e164) {
-        return res.status(400).json({ error: 'invalid_phone', reason: norm.reason || 'normalize_failed' });
+        return res
+          .status(400)
+          .json({ error: 'invalid_phone', reason: norm.reason || 'normalize_failed' });
       }
       const target = await prisma.user.findUnique({
         where: { phoneE164: norm.e164 },
@@ -178,6 +298,7 @@ async function removeContact(req, res) {
 
 module.exports = {
   lookupByPhone,
+  matchContacts,
   addContact,
   listContacts,
   removeContact,
