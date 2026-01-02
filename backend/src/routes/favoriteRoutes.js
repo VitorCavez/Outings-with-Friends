@@ -1,31 +1,27 @@
 // backend/src/routes/favoriteRoutes.js
 const express = require('express');
 const router = express.Router();
+
+const { requireAuth } = require('../middleware/auth');
+
 const {
   favoriteOuting,
   unfavoriteOuting,
   listMyFavorites,
 } = require('../controllers/favoriteController');
 
-// Uncomment requireAuth once middleware is wired
-// const { requireAuth } = require('../middleware/auth');
-
 // Favorite an outing
-router.post('/api/outings/:outingId/favorite', /* requireAuth, */ favoriteOuting);
+router.post('/api/outings/:outingId/favorite', requireAuth, favoriteOuting);
 
 // Unfavorite an outing
-router.delete('/api/outings/:outingId/favorite', /* requireAuth, */ unfavoriteOuting);
+router.delete('/api/outings/:outingId/favorite', requireAuth, unfavoriteOuting);
 
 // List current user’s favorites
-router.get('/api/users/me/favorites', /* requireAuth, */ listMyFavorites);
+router.get('/api/users/me/favorites', requireAuth, listMyFavorites);
 
-router.get('/api/favorites', async (_req, res) => {
-  try {
-    res.json({ items: [] });
-  } catch (err) {
-    console.error('favoriteRoutes error:', err);
-    res.status(500).json({ error: 'Failed to load favorites' });
-  }
+// (Optional) keep or remove this placeholder route
+router.get('/api/favorites', requireAuth, async (_req, res) => {
+  res.json({ items: [] });
 });
 
 module.exports = router;

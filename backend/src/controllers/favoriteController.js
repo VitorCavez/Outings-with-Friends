@@ -3,8 +3,14 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 function getAuthUserId(req) {
-  // Prefer auth middleware -> req.user.id. Fallbacks allow simple testing.
-  return req.user?.id || req.headers['x-user-id'] || req.query.userId || null;
+  // Your requireAuth middleware sets req.user.userId
+  return (
+    req.user?.userId ||
+    req.user?.id || // fallback if any legacy code sets id
+    req.headers['x-user-id'] ||
+    req.query.userId ||
+    null
+  );
 }
 
 /**
